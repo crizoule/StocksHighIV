@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from zoneinfo import ZoneInfo
 
-from . import config, iv, net, store, universe
+from . import config, iv, net, store, universe, progress
 
 MARKET_TZ = ZoneInfo("America/Toronto")
 log = partial(print, flush=True)
@@ -33,13 +33,18 @@ def load_universe(client, run_date: str, refresh: bool = False) -> list[dict]:
 
 def scan(run_date: str | None = None, refresh_universe: bool = False, refresh_quotes: bool = False) -> str:
     run_date = run_date or market_today()
+    progress.emit(phase="universe", activity="Downloading the list of optionable companies")
     with closing(store.connect()) as conn, net.make_client() as client:
         stocks = load_universe(client, run_date, refresh_universe)
         us_count = sum(s["market"] == "US" for s in stocks)
         log(f"Universe {run_date}: {len(stocks)} optionable stocks over "
             f"${config.MIN_MARKET_CAP_USD / 1e9:g}B ({us_count} US-listed, {len(stocks) - us_count} TSX-only)")
 
-        done = set() if refresh_quotes else store.scanned_symbols(conn, run_date)
+        if refresh_quotes:
+            # Persist pending work so Resume also works after an interrupted same-day refresh.
+            conn.execute("UPDATE scans SET status = 'pending' WHERE run_date = ?", (run_date,))
+            conn.commit()
+        done = store.scanned_symbols(conn, run_date)
         # Montreal Exchange names first: they use a separate, faster limit.
         todo = sorted((s for s in stocks if s["symbol"] not in done), key=lambda s: s["market"] != "CA")
         if done:
@@ -49,9 +54,12 @@ def scan(run_date: str | None = None, refresh_universe: bool = False, refresh_qu
         mx_limiter = net.RateLimiter(min_interval=config.MX_MIN_INTERVAL_S)
         started = time.monotonic()
         with_iv = 0
+        errors = 0
+        progress.emit(phase="scan", completed=0, total=len(todo), reused=len(stocks)-len(todo), with_iv=0, errors=0, activity="Downloading IV quotes")
         for i, stock in enumerate(todo, 1):
             source = "cboe" if stock["cboe"] else "mx"
             failed = False
+            progress.emit(activity=f"Downloading {stock['symbol']} from {source.upper()}")
             try:
                 result = (iv.cboe_iv30(client, cboe_limiter, stock["cboe"]) if stock["cboe"]
                           else iv.mx_iv30(client, mx_limiter, stock["mx"]))
@@ -60,6 +68,8 @@ def scan(run_date: str | None = None, refresh_universe: bool = False, refresh_qu
                 log(f"  {stock['symbol']}: {exc}; will retry on the next scan")
             store.record_scan(conn, run_date, stock["symbol"], source, result, failed=failed)
             with_iv += result is not None
+            errors += failed
+            progress.emit(completed=i, with_iv=with_iv, errors=errors, activity=f"Checked {stock['symbol']}")
             if i % 100 == 0 or i == len(todo):
                 per_item = (time.monotonic() - started) / i
                 log(f"  {i}/{len(todo)} scanned ({with_iv} with IV), ~{(len(todo) - i) * per_item / 60:.0f} min left")

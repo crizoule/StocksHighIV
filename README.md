@@ -14,6 +14,22 @@ Then open http://127.0.0.1:8931/dashboard.html.
 
 Generated market data, snapshots, logs, backups and HTML reports are local runtime files and are not included in Git. Run the screen to create them.
 
+## Easy launch (Windows or Mac)
+
+1. Download the GitHub ZIP and **extract the entire folder** (or clone the repository).
+2. Install **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/) if needed. On Windows, enable **Add Python to PATH** during installation.
+3. Double-click **Start StocksHighIV.bat** on Windows or **Start StocksHighIV.command** on Mac.
+4. Your browser opens the local start page at **http://127.0.0.1:8932/**. Dependency setup runs automatically, with its output visible in the activity log.
+5. Click **Download market data**. The page shows the current stock/provider, completed and total quotes, measured companies per minute, elapsed time, scan ETA, failures, and provider retry/backoff messages. Enrichment shows completed companies without inventing a fixed total or ETA.
+
+A first download usually takes about an hour, depending on provider response times. Opening the launcher does **not** automatically scan. **Open saved dashboard** remains available while refreshing; the final report replaces the old one atomically. **Refresh market data** starts a fresh scan; **Resume unfinished download** reuses completed stocks from today and retries unfinished/failed requests, including after an interrupted refresh. Enrichment restarts when resuming. This is a local application, not a public web server; it binds only to `127.0.0.1`.
+
+Keep the launcher window open. Ctrl+C stops the server and its download process; relaunch and choose Resume to continue. Reopening the launcher while it is already running opens the existing app. A closed browser tab does not stop the download.
+
+If the Mac ZIP extraction drops execute permission, run `chmod +x "Start StocksHighIV.command"` once from the extracted folder. You can also launch directly with `python3 launch.py` (Mac) or `py -3 launch.py` (Windows). If port 8932 is occupied by another application, use `python3 launch.py --port 8933` (or `py -3` on Windows). Failed dependency installation can be retried from the page after fixing the internet connection or Python installation. The `.venv` directory belongs to this machine; do not copy it between Windows and Mac.
+
+The command-line examples below use Mac/Linux paths; on Windows replace `.venv/bin/python` with `.venv\Scripts\python.exe`.
+
 ## Run
 
 Every command starts by moving into the project folder — the paths below are relative to it:
@@ -122,7 +138,7 @@ Run the offline regression suite from the project folder:
 
 ```bash
 .venv/bin/python -m unittest discover -v
-node --test tests/test_dashboard.cjs
+node --test tests/test_dashboard.cjs tests/test_launcher.cjs
 ```
 
 The tests use temporary databases and mocked providers, including a complete dashboard build

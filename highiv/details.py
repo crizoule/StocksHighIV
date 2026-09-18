@@ -44,6 +44,7 @@ def fetch(yahoo_symbol: str) -> dict | None:
         short_pct = shares_short / float_shares
 
     return {
+        "details_fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "name": info.get("longName") or info.get("shortName"),
         "country": info.get("country"),
         "sector": info.get("sector"),

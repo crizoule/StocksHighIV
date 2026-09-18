@@ -130,7 +130,7 @@ def _earnings(row: dict, as_of: date) -> dict | None:
         return None
     flag = row.get("earnings_estimated")
     status = "estimated" if flag is True else "confirmed date" if flag is False else "date unconfirmed"
-    label = event_date.strftime("%b %-d")
+    label = f"{event_date:%b} {event_date.day}"
     return {
         "iv_why": f"Upcoming earnings {label} ({status})",
         "iv_why_kind": "earnings",

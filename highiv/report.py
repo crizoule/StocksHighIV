@@ -1,16 +1,19 @@
 """Rank the latest scan, enrich the leaders (float, short interest, 52-week data, IV rank) and write the dashboard."""
 from __future__ import annotations
 
+import base64
 import json
+import os
 import re
 import statistics
+import tempfile
 from collections import Counter
 from datetime import date, datetime
 from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import borrow, config, context, details, explain, iv, net, news, prices, store
+from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress
 from .universe import norm_name
 
 log = partial(print, flush=True)
@@ -156,7 +159,7 @@ def _earnings(info: dict, today: date) -> dict:
     return {
         "next_earnings": when.date().isoformat(),
         "earnings_in_days": in_days,
-        "earnings_time": when.strftime("%-I:%M %p").lower() if confirmed else None,
+        "earnings_time": when.strftime("%I:%M %p").lstrip("0").lower() if confirmed else None,
         "earnings_session": session if confirmed else None,
         "earnings_estimated": estimated,
         "earnings_window_end": window_end.isoformat() if window_end else None,
@@ -213,6 +216,8 @@ def _row(stock: dict, scan: dict, info: dict, series: list[tuple[str, float]], t
         "borrow_fee": loan.get("fee"),
         "borrow_available": loan.get("available"),
         "borrow_capped": loan.get("capped"),
+        "borrow_fetched_at": loan.get("fetched_at"),
+        "details_fetched_at": info.get("details_fetched_at"),
         "prices": price_frames,
         "low_52w": low,
         "high_52w": high,
@@ -246,18 +251,32 @@ def render(payload: dict) -> str:
         template.replace("/*__CSS__*/", (config.TEMPLATE_DIR / "dashboard.css").read_text())
         .replace("/*__JS__*/", (config.TEMPLATE_DIR / "dashboard.js").read_text())
         .replace("__DATA_JSON__", data)
+        .replace("__FAVICON_BASE64__", base64.b64encode((config.TEMPLATE_DIR / "favicon.svg").read_bytes()).decode("ascii"))
     )
+
+
+def _atomic_text(path: Path, text: str) -> None:
+    """Readers keep seeing the last complete report while a refresh is written."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+        os.replace(temporary, path)
+    finally:
+        if temporary and temporary.exists():
+            temporary.unlink()
 
 
 def write_outputs(payload: dict) -> Path:
     context.apply(payload)
     config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    (config.SNAPSHOT_DIR / f"{payload['run_date']}.json").write_text(json.dumps(payload))
     page = render(payload)
-    (config.OUTPUT_DIR / "artifact.html").write_text(page)  # body-only page for publishing
+    _atomic_text(config.SNAPSHOT_DIR / f"{payload['run_date']}.json", json.dumps(payload))
+    _atomic_text(config.OUTPUT_DIR / "artifact.html", page)  # body-only page for publishing
     standalone = config.OUTPUT_DIR / "dashboard.html"
-    standalone.write_text(
+    _atomic_text(standalone,
         '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
         f"</head>\n<body>\n{page}\n</body>\n</html>\n"
@@ -280,6 +299,7 @@ def _universe_stats(stocks: list[dict], scans: list[dict]) -> dict:
 
 
 def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -> Path:
+    progress.emit(phase="enrich", completed=0, total=None, activity="Downloading borrow fees and availability from IBKR")
     conn = store.connect()
     run_date = run_date or store.latest_run_date(conn)
     if not run_date:
@@ -295,6 +315,9 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         key=lambda r: r["iv30"],
         reverse=True,
     )
+    if not scans:
+        conn.close()
+        raise RuntimeError("No usable IV quotes in this scan. Resume to retry failed requests; the previous dashboard has been kept.")
     today = datetime.now(MARKET_TZ).date()
     borrow_table = borrow.load()
     log(f"Ranking {len(scans)} stocks with IV from the {run_date} scan "
@@ -325,6 +348,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
             band = cap_band(stock["market_cap_usd"])
             if lookups[band] >= config.MAX_DETAIL_LOOKUPS:
                 continue
+            progress.emit(activity=f"Downloading company details for {stock['symbol']}")
             info = details.fetch(stock["yahoo"])
             lookups[band] += 1
             if info is None or config.excluded_industry(info["industry"]):
@@ -338,14 +362,17 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
             seen_companies.add(company)
             if stock["market"] == "US":
                 _bootstrap_history(conn, client, aq_limiter, stock["symbol"], scan)
+            progress.emit(activity=f"Downloading price charts for {stock['symbol']}")
             price_frames, price_stats = prices.fetch(stock["yahoo"])
             row = _row(stock, scan, info, store.iv_series(conn, stock["symbol"]), today,
                        price_frames, price_stats, borrow.lookup(borrow_table, stock))
+            progress.emit(activity=f"Checking headlines for {stock['symbol']}")
             headlines = news.fetch(stock["yahoo"])
             row["news_headlines"] = headlines
             row["news_checked_at"] = datetime.now(MARKET_TZ).isoformat(timespec="seconds")
             row.update(explain.choose(row, headlines, as_of=date.fromisoformat(scan.get("quote_date") or run_date)))
             rows.append(row)
+            progress.emit(completed=len(rows), activity=f"Enriched {stock['symbol']}: charts, short interest and news")
             filled.update(v for v in VIEWS if _in_view(row, *v, hq_known=True))
             if len(rows) % 10 == 0:
                 log(f"  {len(rows)} leaders enriched ({sum(lookups.values())} new lookups)")
@@ -378,6 +405,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         "rows": rows,
     }
     conn.close()
+    progress.emit(phase="render", activity="Building both dashboard tabs")
     return write_outputs(payload)
 
 

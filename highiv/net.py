@@ -9,7 +9,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 
-from . import config
+from . import config, progress
 
 
 class FetchError(RuntimeError):
@@ -82,16 +82,19 @@ def get(
         try:
             resp = client.get(url, params=params)
         except httpx.TransportError:
+            progress.emit(activity=f"Connection interrupted; retrying in {2**attempt}s")
             time.sleep(2**attempt)
             continue
         if resp.status_code == 429:
             delay = _retry_delay(resp.headers.get("retry-after"))
+            progress.emit(activity=f"Provider rate limit; waiting {delay:.0f}s before retrying")
             if limiter:
                 limiter.pause(delay)
             else:
                 time.sleep(delay)
             continue
         if resp.status_code >= 500:
+            progress.emit(activity=f"Provider temporarily unavailable; retrying in {2**attempt}s")
             time.sleep(2**attempt)
             continue
         return resp

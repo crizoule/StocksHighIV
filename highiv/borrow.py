@@ -10,6 +10,7 @@ stay short. AVAILABLE is the lendable share count, capped in the file as ">10000
 from __future__ import annotations
 
 import urllib.request
+from datetime import datetime, timezone
 
 FTP_ROOT = "ftp://shortstock:@ftp2.interactivebrokers.com"
 FILES = (("US", "usa.txt"), ("CA", "canada.txt"))
@@ -46,8 +47,10 @@ def load() -> dict[tuple[str, str], dict]:
     for market, name in FILES:
         try:
             with urllib.request.urlopen(f"{FTP_ROOT}/{name}", timeout=90) as response:
-                table.update({(market, symbol): loan for symbol, loan in
-                              _parse(response.read().decode("latin-1")).items()})
+                loans = _parse(response.read().decode("latin-1"))
+                fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                table.update({(market, symbol): {**loan, "fetched_at": fetched_at}
+                              for symbol, loan in loans.items()})
         except Exception:
             continue
     return table

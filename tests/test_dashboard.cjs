@@ -191,3 +191,28 @@ test('cap tabs support arrow/Home/End keys and refresh overview statistics', () 
   app.key('cap-tabs', 'End');
   assert.equal(symbols(app)[0], 'BIG0');
 });
+
+test('funding and short-position timestamps remain distinct from report generation', () => {
+  const { collapsed } = renderEarnings(null, {
+    short_date: '2026-08-31', short_pct_float: 20, shares_short: 1e6,
+    days_to_cover: 4, float_shares: 5e6,
+    borrow_fee: 12, borrow_available: 5000,
+    borrow_fetched_at: '2026-09-17T18:30:00Z',
+    details_fetched_at: '2026-09-16T17:15:00Z',
+  });
+  assert.match(collapsed, /SI as of 2026-08-31/);
+  assert.match(collapsed, /Fetched Sep 17, 2026, 2:30 PM ET/);
+  assert.match(collapsed, /Fetched Sep 16, 2026, 1:15 PM ET/);
+  assert.match(collapsed, /1M shares short/);
+  assert.doesNotMatch(collapsed, /Fetched Sep 18/);
+});
+
+test('legacy snapshots do not invent retrieval dates', () => {
+  const { collapsed } = renderEarnings(null, {
+    short_pct_float: 10, days_to_cover: 3, borrow_fee: 5, borrow_available: 0,
+  });
+  assert.match(collapsed, /Fetch time not recorded/);
+  assert.match(collapsed, /SI date unavailable/);
+  assert.match(collapsed, /0 available/);
+  assert.doesNotMatch(collapsed, /Fetched Sep/);
+});

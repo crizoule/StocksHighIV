@@ -130,6 +130,22 @@ class ScanTests(TempProjectTest):
         with closing(store.connect()) as conn:
             self.assertEqual(store.scanned_symbols(conn, RUN_DATE), {"OTHER"})
 
+    def test_interrupted_same_day_refresh_resumes_pending_old_quotes(self):
+        with closing(store.connect()) as conn:
+            for symbol in ('TEST', 'OTHER'):
+                store.record_scan(conn, RUN_DATE, symbol, 'cboe', QUOTE)
+        self.fetch.side_effect = [{**QUOTE, 'iv30': 80}, KeyboardInterrupt(), {**QUOTE, 'iv30': 90}]
+        with patch.object(scan, 'load_universe', return_value=[STOCK, {**STOCK, 'symbol': 'OTHER'}]):
+            with self.assertRaises(KeyboardInterrupt):
+                scan.scan(RUN_DATE, refresh_quotes=True)
+            with closing(store.connect()) as conn:
+                self.assertEqual(store.scanned_symbols(conn, RUN_DATE), {'TEST'})
+                self.assertEqual(len(store.scan_results(conn, RUN_DATE)), 1)
+            scan.scan(RUN_DATE)
+        self.assertEqual(self.fetch.call_count, 3)
+        with closing(store.connect()) as conn:
+            self.assertEqual({r['symbol']: r['iv30'] for r in store.scan_results(conn, RUN_DATE)}, {'TEST': 80, 'OTHER': 90})
+
     def test_existing_database_migration_preserves_history_and_retries_ambiguous_nulls(self):
         with closing(sqlite3.connect(config.DB_PATH)) as conn:
             conn.execute("CREATE TABLE scans (run_date TEXT, symbol TEXT, source TEXT, iv30 REAL, "

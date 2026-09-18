@@ -169,7 +169,15 @@
       `<span class="fill" style="width:${r.iv_percentile}%"></span><span class="dot" style="left:${r.iv_percentile}%"></span></span>`;
   };
 
-  /* Borrow fee is what a short actually pays to stay short: the squeeze pressure gauge. */
+  const fetchedLabel = (stamp) => {
+    const d = stamp ? new Date(stamp) : null;
+    return d && Number.isFinite(d.getTime())
+      ? `Fetched ${new Intl.DateTimeFormat("en-US", {timeZone: "America/New_York", month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"}).format(d)} ET`
+      : "Fetch time not recorded";
+  };
+  const fetchStamp = (stamp) => `<span class="sub freshness" data-tip="Retrieval time, not the provider’s last update time. Older snapshots did not record retrieval timestamps.">${esc(fetchedLabel(stamp))}</span>`;
+  const shortStamp = (r) => `<span class="sub freshness" data-tip="Yahoo short-interest settlement date. This dates the reported short position, not publication or retrieval. Days to cover also depends on an average-volume window whose update time is not supplied.">${r.short_date ? `SI as of ${esc(r.short_date)}` : "SI date unavailable"}</span>`;
+  /* IBKR indicative annual borrow fee and available inventory from the same fetched file. */
   const borrowCell = (r) => {
     if (!isNum(r.borrow_fee)) return `<span class="muted">—</span>`;
     const fee = `${nf1.format(r.borrow_fee)}<small>%</small>`;
@@ -177,7 +185,7 @@
       ? `${compact(r.borrow_available)}${r.borrow_capped ? "+" : ""} available`
       : "";
     return `<span class="val">${r.borrow_fee >= 20 ? `<span class="chip hot">${fee}</span>` : fee}</span>` +
-      (available ? `<span class="sub">${available}</span>` : "");
+      (available ? `<span class="sub">${available}</span>` : "") + fetchStamp(r.borrow_fetched_at);
   };
 
   const industryCell = (r) => {
@@ -296,9 +304,9 @@
       `<td class="r col-hv">${hvCell(r)}</td>` +
       `<td class="col-price">${priceCell(r)}</td>` +
       `<td class="col-range">${range}</td>` +
-      `<td class="r">${float}</td>` +
-      `<td class="r">${shortPct}</td>` +
-      `<td class="r">${dtc}</td>` +
+      `<td class="r">${float}${isNum(r.float_shares) ? fetchStamp(r.details_fetched_at) : ""}</td>` +
+      `<td class="r">${shortPct}${isNum(r.shares_short) ? `<span class="sub">${compact(r.shares_short)} shares short</span>` : ""}${isNum(r.short_pct_float) || isNum(r.shares_short) ? shortStamp(r) : ""}</td>` +
+      `<td class="r">${dtc}${isNum(r.days_to_cover) ? shortStamp(r) + fetchStamp(r.details_fetched_at) : ""}</td>` +
       `<td class="r col-borrow">${borrowCell(r)}</td>` +
       `<td>${squeezeChip(r.squeeze)}</td>` +
       `<td class="r"><span class="val">${compact(r.market_cap_usd, "$")}</span></td>` +
@@ -431,6 +439,9 @@
         ["Borrow fee", isNum(r.borrow_fee) ? `${nf1.format(r.borrow_fee)}% a year` : "—"],
         ["Shares available to borrow", isNum(r.borrow_available) ? `${compact(r.borrow_available)}${r.borrow_capped ? "+" : ""}` : "—"],
         ["Settlement date", fmtDay(r.short_date)],
+        ["Short / float data fetched", esc(fetchedLabel(r.details_fetched_at))],
+        ["Borrow fee / availability fetched", esc(fetchedLabel(r.borrow_fetched_at))],
+        ["Timing", "The settlement date dates the short position. Fetch times show when the feed was retrieved; the provider’s exact update time for float, days to cover and borrow data is not supplied."],
       ]) +
       (isNum(r.earnings_in_days)
         ? group("Next earnings", [

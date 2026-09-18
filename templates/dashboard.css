@@ -396,6 +396,7 @@ th.col-stock { z-index: 2; }
 .big small, .val small { margin-left: 1px; font-size: 11px; font-weight: 600; color: var(--ink-3); }
 .sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .muted { color: var(--ink-3); }
+.freshness { white-space: normal; max-width: 25ch; font-size: 10.5px; }
 
 .col-why { min-width: 228px; max-width: 280px; }
 .col-why .chip { margin-bottom: 3px; }

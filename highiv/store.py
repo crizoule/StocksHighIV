@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS scans (
     iv30_change REAL,
     price       REAL,
     quote_date  TEXT,           -- trading session the quote belongs to
-    status      TEXT NOT NULL DEFAULT 'error', -- ok | no_iv | error
+    status      TEXT NOT NULL DEFAULT 'error', -- ok | no_iv | error | pending
     PRIMARY KEY (run_date, symbol)
 );
 CREATE TABLE IF NOT EXISTS iv_history (
@@ -69,7 +69,7 @@ def record_scan(conn: sqlite3.Connection, run_date: str, symbol: str, source: st
 
 def scan_results(conn: sqlite3.Connection, run_date: str) -> list[dict]:
     cur = conn.execute(
-        f"SELECT {', '.join(COLUMNS)} FROM scans WHERE run_date = ? AND iv30 IS NOT NULL", (run_date,)
+        f"SELECT {', '.join(COLUMNS)} FROM scans WHERE run_date = ? AND iv30 IS NOT NULL AND status = 'ok'", (run_date,)
     )
     return [dict(zip(COLUMNS, row)) for row in cur]
 
