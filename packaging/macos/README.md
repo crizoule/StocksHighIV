@@ -39,3 +39,20 @@ python3 packaging/macos/build.py
 ```
 
 This creates an explicitly **UNSIGNED** test ZIP with an ad-hoc signature; it does not remove Gatekeeper warnings and must not be presented as a notarized release. No account credentials are needed for this build.
+
+## In-app updates (1.1.0+)
+
+The Mac launcher embeds Sparkle 2.10.0 (download pinned by SHA-256), checks for updates daily, and offers **Check for Updates…** in its application menu. Installing requires the user's action. Sparkle verifies Ed25519 archive signatures and Apple code signatures; notarization is retained. The archive is verified before extraction. Its private update-signing key stays in the `StocksHighIV-updates` Keychain account; only the public key is in `release.json`.
+
+When installation is requested, the launcher reserves the Python backend. Active setup/download work finishes first; new scheduled/manual scans are blocked until restart or cancellation. The browser status bar reports the pending update. Application Support data, watchlists, and schedules are outside the replaced bundle. Put the app in a writable Applications folder; macOS may request authorization when replacing a protected copy.
+
+For every release:
+
+1. Increase both `version` and numeric `build` in `release.json`. Never reuse a build number.
+2. Run the signed build command above. It now generates both the notarized ZIP and a signed `dist/macos/appcast.xml` after verifying the signatures.
+3. Publish **both** files as assets of the corresponding GitHub release (`v` plus the version). Draft the release, upload both assets, then publish it. Keep all releases' assets immutable; don't replace a ZIP without re-signing its feed.
+4. The feed URL is `https://github.com/crizoule/StocksHighIV/releases/latest/download/appcast.xml`. Therefore every new latest release must include the appcast. Pushing source changes alone does not publish an application update.
+
+Users on 1.0.x need one manual installation of 1.1.0 or later to acquire the updater. Windows/source launchers do not self-update. Preserve the update-signing Keychain key when moving build machines; losing it requires a deliberate key-rotation plan.
+
+After committing and pushing, `python3 packaging/macos/publish.py` verifies both update signatures, uploads both assets to a draft release, and publishes it as latest. This avoids exposing a latest release before its update feed is available. The publisher refuses an uncommitted worktree or a mismatched archive/feed.

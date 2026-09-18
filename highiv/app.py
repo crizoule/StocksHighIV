@@ -40,6 +40,7 @@ class App:
         except (OSError, ValueError, TypeError):
             pass
         self.closing = False
+        self.update_requested = False
         self.started = self.phase_started = None
         self.last_activity = time.monotonic()
         self.state = dict(status='setup', phase='setup', activity='Preparing Python dependencies',
@@ -73,6 +74,7 @@ class App:
             eta = (total - count) / (rate / 60) if rate and count >= 5 and total else None
             saved = self.root / 'output/dashboard.html'
             return {**self.state, 'logs': list(self.state['logs']), 'app': APP_ID,
+                    'update_waiting': self.update_requested,
                     'settings': dict(self.settings), 'watchlist': watchlist.load(self.root),
                     'identity': self.identity, 'token': self.token, 'elapsed': elapsed,
                     'rate': rate, 'eta': eta, 'last_activity_seconds': now-self.last_activity,
@@ -121,7 +123,7 @@ class App:
 
     def scheduled_tick(self, now=None):
         with self.lock:
-            if self.closing or not self.state['ready'] or self.settings['mode'] != 'auto':
+            if self.closing or self.update_requested or not self.state['ready'] or self.settings['mode'] != 'auto':
                 return False
             if self.state['status'] in ('setup', 'running'):
                 return False
@@ -197,6 +199,8 @@ class App:
 
     def start(self, action):
         with self.lock:
+            if self.closing or self.update_requested:
+                return False
             if self.state['status'] in ('setup', 'running'):
                 return False
             if action == 'setup':
@@ -311,13 +315,18 @@ def handler(app):
             expected_origin = f'http://127.0.0.1:{self.server.server_port}'
             if not self.local_host() or self.headers.get('Origin') != expected_origin or not secrets.compare_digest(self.headers.get('X-App-Token', ''), app.token):
                 return self.send(403, '{}')
-            if self.path not in ('/api/start', '/api/settings', '/api/watchlist'):
+            if self.path not in ('/api/start', '/api/settings', '/api/watchlist', '/api/prepare-update', '/api/cancel-update'):
                 return self.send(404, '{}')
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 1000:
                     raise ValueError()
                 payload = json.loads(self.rfile.read(length))
+                if self.path in ('/api/prepare-update', '/api/cancel-update'):
+                    with app.lock:
+                        app.update_requested = self.path == '/api/prepare-update'
+                        ready = app.state['status'] not in ('setup', 'running')
+                    return self.send(200, json.dumps({'ready': ready}))
                 if self.path == '/api/watchlist':
                     with app.lock:
                         symbols = watchlist.change(app.root, payload.get('symbol'), payload.get('action'))

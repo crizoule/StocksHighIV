@@ -18,6 +18,8 @@ Generated market data, snapshots, logs, backups and HTML reports are local runti
 
 **Mac users:** [Download the signed and Apple-notarized app](https://github.com/crizoule/StocksHighIV/releases/latest/download/StocksHighIV-macOS.zip), extract it, and open **StocksHighIV.app**. Supports Intel and Apple Silicon on macOS 12+. Install Python 3.11+ from python.org first. The app opens the dashboard in your browser; quit it from the Dock/menu when finished. A normal first-open confirmation may appear. GitHub’s source ZIP contains the development launchers, not the notarized app.
 
+From version 1.1.0, the Mac app checks for updates daily and offers **Check for Updates…** in its app menu. After you choose to install, it waits for an active data download to finish before replacing and relaunching the app. Your watchlist, schedule, and data are preserved. Users on 1.0.x need to download this version once manually. Future updates must be published as signed GitHub Releases; pushing source code alone does not trigger an update. Windows/source launchers still update manually.
+
 Developer build instructions are in [packaging/macos](packaging/macos/README.md). The source-based steps below also support Windows.
 
 1. Download the GitHub ZIP and **extract the entire folder** (or clone the repository).

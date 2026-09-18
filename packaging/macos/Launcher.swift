@@ -1,9 +1,71 @@
 import Cocoa
+import Sparkle
+import CryptoKit
 
 // The signed bundle stays immutable; Python and market data live in Application Support.
-final class Launcher: NSObject, NSApplicationDelegate {
+final class Launcher: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
     var process: Process?
     var log: FileHandle?
+    var updaterController: SPUStandardUpdaterController!
+    var backendIdentity = ""
+    var pendingInstall: (() -> Void)?
+    var updateTimer: Timer?
+
+    @objc func checkForUpdates(_ sender: Any?) {
+        updaterController.checkForUpdates(sender)
+    }
+
+    func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
+                 untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
+        pendingInstall = installHandler
+        reserveUpdate()
+        return true
+    }
+
+    func updateBackend(_ action: String, completion: @escaping (Bool) -> Void) {
+        let base = "http://127.0.0.1:8932"
+        var request = URLRequest(url: URL(string: base + "/api/status")!)
+        request.timeoutInterval = 5
+        URLSession.shared.dataTask(with: request) { data, _, _ in
+            guard let data, let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  status["identity"] as? String == self.backendIdentity,
+                  let token = status["token"] as? String else {
+                DispatchQueue.main.async { completion(false) }; return
+            }
+            var post = URLRequest(url: URL(string: base + "/api/" + action)!)
+            post.httpMethod = "POST"; post.timeoutInterval = 5; post.httpBody = Data("{}".utf8)
+            post.setValue(base, forHTTPHeaderField: "Origin")
+            post.setValue(token, forHTTPHeaderField: "X-App-Token")
+            post.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            URLSession.shared.dataTask(with: post) { data, response, _ in
+                let result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                let ready = (response as? HTTPURLResponse)?.statusCode == 200 && result?["ready"] as? Bool == true
+                DispatchQueue.main.async { completion(ready) }
+            }.resume()
+        }.resume()
+    }
+
+    func reserveUpdate() {
+        updateBackend("prepare-update") { ready in
+            guard self.pendingInstall != nil else {
+                self.updateBackend("cancel-update") { _ in }; return
+            }
+            if ready {
+                let install = self.pendingInstall
+                self.pendingInstall = nil
+                install?()
+            } else {
+                self.updateTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in self.reserveUpdate() }
+            }
+        }
+    }
+
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        updateTimer?.invalidate()
+        pendingInstall = nil
+        updateBackend("cancel-update") { _ in }
+    }
+
 
     func fail(_ message: String) {
         let alert = NSAlert()
@@ -19,6 +81,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
         menu.addItem(item)
         let submenu = NSMenu()
         submenu.addItem(withTitle: "Open dashboard", action: #selector(openDashboard), keyEquivalent: "o").target = self
+        submenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
         submenu.addItem(withTitle: "Quit StocksHighIV", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = submenu
         NSApp.mainMenu = menu
@@ -30,6 +93,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
             let payload = Bundle.main.resourceURL!.appendingPathComponent("project")
             let revision = Bundle.main.object(forInfoDictionaryKey: "StocksHighIVRevision") as! String
             let workspace = support.appendingPathComponent("versions/" + revision)
+            backendIdentity = SHA256.hash(data: Data(workspace.resolvingSymlinksInPath().path.utf8)).map { String(format: "%02x", $0) }.joined()
             if !fm.fileExists(atPath: workspace.path) {
                 try fm.createDirectory(at: workspace.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let staging = support.appendingPathComponent(UUID().uuidString)
@@ -78,6 +142,7 @@ final class Launcher: NSObject, NSApplicationDelegate {
             }
             process = child
             try child.run()
+            updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         } catch { fail(error.localizedDescription) }
     }
 

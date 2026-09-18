@@ -203,3 +203,25 @@ class HTTPTests(unittest.TestCase):
         self.assertIn(b'id="cap-watch"', body)
         self.assertIn(b'"logo_webp": "d2VicA=="', body)
         self.assertEqual(report.read_text(), original)
+
+    def test_update_waits_for_scan_and_reserves_idle_app(self):
+        good = {'Origin': self.origin, 'X-App-Token': self.app.token}
+        self.app.update(status='running', ready=True)
+        code, body = self.request('POST', '/api/prepare-update', '{}', good)
+        self.assertEqual(code, 200)
+        self.assertFalse(json.loads(body)['ready'])
+        self.assertTrue(self.app.snapshot()['update_waiting'])
+        self.app.update(status='done')
+        self.assertFalse(self.app.start('refresh'))
+        self.app.settings.update(mode='auto', time='00:00')
+        self.assertFalse(self.app.scheduled_tick(datetime(2026, 9, 18, 18)))
+        code, body = self.request('POST', '/api/prepare-update', '{}', good)
+        self.assertTrue(json.loads(body)['ready'])
+        self.assertEqual(self.request('POST', '/api/cancel-update', '{}', good)[0], 200)
+        with patch('highiv.app.threading.Thread'):
+            self.assertTrue(self.app.start('resume'))
+
+    def test_update_reservation_requires_local_authentication(self):
+        for endpoint in ('/api/prepare-update', '/api/cancel-update'):
+            self.assertEqual(self.request('POST', endpoint, '{}')[0], 403)
+        self.assertFalse(self.app.update_requested)

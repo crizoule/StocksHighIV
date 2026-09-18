@@ -75,6 +75,7 @@
         ? `Downloading · ${scanProgress}${state.activity}${state.rate ? ` · ${state.rate.toFixed(1)} companies/min` : ''}${saved}`
         : state.status === 'error' ? `Download/setup needs attention — see progress${saved}`
         : state.status === 'setup' ? `Setting up${saved}` : `Showing saved market data${saved}`;
+      if (state.update_waiting) el('progress').textContent += ' · App update will install after this download finishes';
       if (state.dashboard_saved_at > initialStamp) el('complete').hidden = false;
       if (state.completion_id && completion !== state.completion_id) {
         completion = state.completion_id;
