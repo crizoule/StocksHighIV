@@ -27,6 +27,7 @@ APP_ID = 'stockshighiv-local-v1'
 class App:
     def __init__(self, root=config.ROOT):
         self.root = Path(root)
+        self.data_root = Path(os.environ.get("HIGHIV_DATA_ROOT", self.root))
         self.identity = hashlib.sha256(str(self.root.resolve()).encode()).hexdigest()
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
@@ -34,7 +35,7 @@ class App:
         self.stop_scheduler = threading.Event()
         self.settings = {'mode': 'manual', 'time': '16:30', 'last_scheduled_date': None}
         try:
-            saved_settings = json.loads((self.root/'data/launcher-settings.json').read_text())
+            saved_settings = json.loads((self.data_root/'data/launcher-settings.json').read_text())
             self.validate_settings(saved_settings)
             self.settings.update(saved_settings)
         except (OSError, ValueError, TypeError):
@@ -72,10 +73,10 @@ class App:
             rate = count / duration * 60 if duration > 0 and count and active else None
             total = self.state['total']
             eta = (total - count) / (rate / 60) if rate and count >= 5 and total else None
-            saved = self.root / 'output/dashboard.html'
+            saved = self.data_root / 'output/dashboard.html'
             return {**self.state, 'logs': list(self.state['logs']), 'app': APP_ID,
                     'update_waiting': self.update_requested,
-                    'settings': dict(self.settings), 'watchlist': watchlist.load(self.root),
+                    'settings': dict(self.settings), 'watchlist': watchlist.load(self.data_root),
                     'identity': self.identity, 'token': self.token, 'elapsed': elapsed,
                     'rate': rate, 'eta': eta, 'last_activity_seconds': now-self.last_activity,
                     'has_dashboard': saved.exists(),
@@ -96,7 +97,7 @@ class App:
             raise ValueError('Choose a valid time.')
 
     def persist_settings(self, settings):
-        path = self.root/'data/launcher-settings.json'
+        path = self.data_root/'data/launcher-settings.json'
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix('.tmp')
         temporary.write_text(json.dumps(settings), encoding='utf-8')
@@ -221,7 +222,7 @@ class App:
             if action == 'refresh':
                 command.append('--refresh-quotes')
             self.run_process(command, events=True)
-            if not (self.root/'output/dashboard.html').exists():
+            if not (self.data_root/'output/dashboard.html').exists():
                 raise RuntimeError('The download ended without producing a dashboard.')
             self.update(completion_id=str(time.time_ns()), status='done', phase='done', activity='Dashboard updated — ready to open',
                         elapsed=time.monotonic()-self.started)
@@ -269,7 +270,7 @@ def handler(app):
             path = self.path.split('?', 1)[0]
             if path == '/api/status':
                 return self.send(200, json.dumps(app.snapshot()))
-            landing = 'output/dashboard.html' if (app.root/'output/dashboard.html').exists() else 'templates/launcher.html'
+            landing = 'output/dashboard.html' if (app.data_root/'output/dashboard.html').exists() else 'templates/launcher.html'
             files = {'/': (landing, 'text/html; charset=utf-8'),
                      '/download': ('templates/launcher.html', 'text/html; charset=utf-8'),
                      '/dashboard.html': ('output/dashboard.html', 'text/html; charset=utf-8'),
@@ -279,7 +280,7 @@ def handler(app):
                 return self.send(404, '{}')
             filename, content_type = files[path]
             try:
-                body = (app.root/filename).read_bytes()
+                body = ((app.data_root if filename.startswith('output/') else app.root)/filename).read_bytes()
                 if filename == 'output/dashboard.html':
                     # Upgrade presentation while retaining the exact saved market data.
                     payload_match = re.search(rb'<script id="payload" type="application/json">(.*?)</script>', body, re.S)
@@ -288,7 +289,7 @@ def handler(app):
                         for row in saved_payload.get('rows', []):
                             symbol = row.get('yahoo_symbol') or row.get('symbol', '')
                             if not row.get('logo_webp') and re.fullmatch(r'[A-Z0-9.\-]{1,24}', symbol):
-                                logo = app.root/'data/logos'/(symbol+'.webp')
+                                logo = app.data_root/'data/logos'/(symbol+'.webp')
                                 try:
                                     if logo.stat().st_size <= 12000:
                                         row['logo_webp'] = base64.b64encode(logo.read_bytes()).decode('ascii')
@@ -303,7 +304,7 @@ def handler(app):
                         body = ('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>' + template + '</body></html>').encode('utf-8')
                 if content_type.startswith('text/html') and b'<body>' in body:
                     controls = (app.root/'templates/app-controls.html').read_bytes()
-                    saved = app.root/'output/dashboard.html'
+                    saved = app.data_root/'output/dashboard.html'
                     stamp = str(saved.stat().st_mtime if saved.exists() else 0).encode()
                     controls = controls.replace(b'REPORT_STAMP', stamp)
                     body = body.replace(b'<body>', b'<body>'+controls, 1)
@@ -315,13 +316,17 @@ def handler(app):
             expected_origin = f'http://127.0.0.1:{self.server.server_port}'
             if not self.local_host() or self.headers.get('Origin') != expected_origin or not secrets.compare_digest(self.headers.get('X-App-Token', ''), app.token):
                 return self.send(403, '{}')
-            if self.path not in ('/api/start', '/api/settings', '/api/watchlist', '/api/prepare-update', '/api/cancel-update'):
+            if self.path not in ('/api/start', '/api/settings', '/api/watchlist', '/api/prepare-update', '/api/cancel-update', '/api/shutdown'):
                 return self.send(404, '{}')
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 1000:
                     raise ValueError()
                 payload = json.loads(self.rfile.read(length))
+                if self.path == '/api/shutdown':
+                    self.send(200, '{}')
+                    threading.Thread(target=self.server.shutdown, daemon=True).start()
+                    return
                 if self.path in ('/api/prepare-update', '/api/cancel-update'):
                     with app.lock:
                         app.update_requested = self.path == '/api/prepare-update'
@@ -329,7 +334,7 @@ def handler(app):
                     return self.send(200, json.dumps({'ready': ready}))
                 if self.path == '/api/watchlist':
                     with app.lock:
-                        symbols = watchlist.change(app.root, payload.get('symbol'), payload.get('action'))
+                        symbols = watchlist.change(app.data_root, payload.get('symbol'), payload.get('action'))
                     return self.send(200, json.dumps({'watchlist': symbols}))
                 if self.path == '/api/settings':
                     app.save_settings(payload)

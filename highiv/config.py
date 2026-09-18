@@ -1,11 +1,13 @@
 """Settings for the high-IV screener. Edit the thresholds here."""
 import re
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
+RUNTIME_ROOT = Path(os.environ.get("HIGHIV_DATA_ROOT", ROOT))
+DATA_DIR = RUNTIME_ROOT / "data"
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
-OUTPUT_DIR = ROOT / "output"
+OUTPUT_DIR = RUNTIME_ROOT / "output"
 TEMPLATE_DIR = ROOT / "templates"
 DB_PATH = DATA_DIR / "highiv.sqlite"
 

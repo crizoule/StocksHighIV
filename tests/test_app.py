@@ -225,3 +225,16 @@ class HTTPTests(unittest.TestCase):
         for endpoint in ('/api/prepare-update', '/api/cancel-update'):
             self.assertEqual(self.request('POST', endpoint, '{}')[0], 403)
         self.assertFalse(self.app.update_requested)
+
+    def test_windows_shared_data_root_preserves_settings_across_versions(self):
+        shared = self.app.root/'shared'
+        with patch.dict('os.environ', {'HIGHIV_DATA_ROOT': str(shared)}):
+            first = App(self.app.root/'version1')
+            first.save_settings({'mode':'auto','time':'11:00'})
+            second = App(self.app.root/'version2')
+            self.assertEqual(second.settings['time'], '11:00')
+            self.assertEqual(second.data_root, shared)
+            self.assertNotEqual(first.identity,second.identity)
+
+    def test_shutdown_requires_local_authentication(self):
+        self.assertEqual(self.request('POST','/api/shutdown','{}')[0],403)
