@@ -63,8 +63,16 @@
       }
       el('saved').hidden = !state.has_dashboard;
       const saved = state.dashboard_saved_at ? ` · saved ${new Date(state.dashboard_saved_at * 1000).toLocaleString()}` : '';
+      let scanProgress = '';
+      if (state.phase === 'scan' && state.total > 0) {
+        const percent = Math.min(100, Math.max(0, Math.floor(state.completed / state.total * 100)));
+        const minutes = state.eta == null ? null : Math.max(1, Math.ceil(state.eta / 60));
+        const remaining = minutes == null ? 'estimating time remaining' : minutes >= 60
+          ? `~${Math.floor(minutes / 60)}h ${minutes % 60}m remaining` : `~${minutes}m remaining`;
+        scanProgress = `IV scan ${percent}% · ${remaining} (IV scan only) · `;
+      }
       el('progress').textContent = state.status === 'running'
-        ? `Downloading · ${state.activity}${state.rate ? ` · ${state.rate.toFixed(1)} companies/min` : ''}${saved}`
+        ? `Downloading · ${scanProgress}${state.activity}${state.rate ? ` · ${state.rate.toFixed(1)} companies/min` : ''}${saved}`
         : state.status === 'error' ? `Download/setup needs attention — see progress${saved}`
         : state.status === 'setup' ? `Setting up${saved}` : `Showing saved market data${saved}`;
       if (state.dashboard_saved_at > initialStamp) el('complete').hidden = false;

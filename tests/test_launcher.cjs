@@ -14,12 +14,16 @@ const controlsScript=fs.readFileSync(path.join(__dirname,'../templates/app-contr
 test('saved dashboard remains visible and completion notifies once',async()=>{
   const elements=new Map();const get=id=>{if(!elements.has(id))elements.set(id,{dataset:{reportStamp:'100'},hidden:true,replaceChildren(){},appendChild(){}});return elements.get(id);};
   const store=new Map(),notices=[];let timer;
-  let status={settings:{mode:'auto',time:'11:00'},token:'t',identity:'app',status:'running',activity:'Checking stocks',has_dashboard:true,dashboard_saved_at:100};
+  let status={settings:{mode:'auto',time:'11:00'},token:'t',identity:'app',status:'running',phase:'scan',total:100,completed:25,eta:90,activity:'Checking stocks',has_dashboard:true,dashboard_saved_at:100};
   function Notice(title,options){notices.push({title,options});}Notice.permission='granted';
   const window={Notification:Notice,location:{href:'/'},dispatchEvent(){}};
   const scope={document:{getElementById:get},CustomEvent:function(){},window,Notification:Notice,AbortSignal,localStorage:{getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v)},fetch:async()=>({ok:true,json:async()=>status}),setTimeout:fn=>{timer=fn;}};
   vm.createContext(scope);vm.runInContext(controlsScript,scope);await new Promise(setImmediate);
   assert.equal(get('local-complete').hidden,true);assert.equal(get('local-saved').hidden,false);
+  assert.match(get('local-progress').textContent,/IV scan 25%/);
+  assert.match(get('local-progress').textContent,/~2m remaining/);
+  status={...status,phase:'enrich',eta:null}; await timer();
+  assert.doesNotMatch(get('local-progress').textContent,/remaining|IV scan/);
   status={...status,status:'done',dashboard_saved_at:200,completion_id:'done1'};
   await timer();assert.equal(get('local-complete').hidden,false);assert.equal(notices.length,1);assert.equal(window.location.href,'/');
   await timer();assert.equal(notices.length,1);
