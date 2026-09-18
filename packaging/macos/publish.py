@@ -1,5 +1,6 @@
 """Publish a built Mac update atomically: keep the release draft until both assets exist."""
 import json
+import re
 from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
@@ -19,10 +20,14 @@ def main():
     expected = f'https://github.com/{REPO}/releases/download/v{version}/StocksHighIV-macOS.zip'
     if enclosure.attrib['url'] != expected:
         raise SystemExit('Release version and appcast URL disagree.')
-    tool = ROOT/'dist/.macos-build/sparkle/bin/sign_update'
     signature = enclosure.attrib['{http://www.andymatuschak.org/xml-namespaces/sparkle}edSignature']
-    for args in ((str(archive), signature), (str(feed),)):
-        subprocess.run([str(tool), '--account', release['keychain_account'], '--verify', *args], check=True)
+    verifier = ['xcrun', 'swift', '-module-cache-path', str(ROOT/'dist/.macos-build/module-cache'),
+                str(ROOT/'packaging/macos/VerifyUpdate.swift')]
+    subprocess.run([*verifier, str(archive), release['update_public_key'], signature], check=True)
+    feed_signature = re.search(rb'<!-- sparkle-signatures:\s*edSignature: (\S+)\s+length: (\d+)\s*-->\s*$', feed.read_bytes())
+    if not feed_signature:
+        raise SystemExit('Missing feed signature')
+    subprocess.run([*verifier, str(feed), release['update_public_key'], feed_signature[1].decode(), feed_signature[2].decode()], check=True)
     # Refuse accidentally publishing code that has not been committed and pushed.
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
