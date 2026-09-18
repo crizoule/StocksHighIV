@@ -13,7 +13,7 @@ from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress
+from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress, watchlist, logos
 from .universe import norm_name
 
 log = partial(print, flush=True)
@@ -31,6 +31,8 @@ def cap_band(cap: float) -> str:
 
 def _in_view(item: dict, market: str, hq: str, band: str, *, hq_known: bool) -> bool:
     """Whether an enriched row (hq_known=True) belongs to a view, or a universe stock could."""
+    if item.get("watch_only"):
+        return False
     if item["market_cap_usd"] < config.MIN_MARKET_CAP_USD or cap_band(item["market_cap_usd"]) != band:
         return False
     on_tsx = item["market"] == "CA" or bool(item["also_listed"])
@@ -201,7 +203,7 @@ def _row(stock: dict, scan: dict, info: dict, series: list[tuple[str, float]], t
         "industry": info["industry"],
         "business": _business_line(info["summary"]),
         "summary": _trim(info["summary"], 700),
-        "market_cap_usd": _market_cap_usd(stock, info),
+        "market_cap_usd": _market_cap_usd(stock, info) or None,
         "currency": info["currency"],
         "price": price,
         "iv30": round(scan["iv30"], 1),
@@ -286,6 +288,9 @@ def write_outputs(payload: dict) -> Path:
 
 
 def _universe_stats(stocks: list[dict], scans: list[dict]) -> dict:
+    excluded = {s["symbol"] for s in stocks if s.get("watch_only")}
+    stocks = [s for s in stocks if s["symbol"] not in excluded]
+    scans = [r for r in scans if r["symbol"] not in excluded]
     values = [r["iv30"] for r in scans]
     return {
         "total": len(stocks),
@@ -310,6 +315,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         raise ValueError("Cached enrichment must belong to the scan being built")
     cached = {r["symbol"]: r for r in (cached_snapshot or {}).get("rows", [])}
     universe = _load_universe()
+    watched = set(watchlist.load())
     scans = sorted(
         (r for r in store.scan_results(conn, run_date) if r["symbol"] in universe),
         key=lambda r: r["iv30"],
@@ -328,36 +334,35 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
     seen_companies: set[str] = set()
     lookups: Counter = Counter()
     caps = {symbol: s["market_cap_usd"] for symbol, s in universe.items()}
-    caps.update({symbol: r["market_cap_usd"] for symbol, r in cached.items() if symbol in universe})
+    caps.update({symbol: r["market_cap_usd"] for symbol, r in cached.items() if symbol in universe and r.get("market_cap_usd") is not None})
     aq_limiter = net.RateLimiter(min_interval=config.ALPHAQUERY_MIN_INTERVAL_S)
     with net.make_client() as client:
         for scan in scans:
-            if all(filled[v] >= config.TOP_N for v in VIEWS):
-                break
             stock = {**universe[scan["symbol"]], "market_cap_usd": caps[scan["symbol"]]}
-            if not _still_needed(stock, filled):
+            is_watched = stock["symbol"] in watched
+            if not is_watched and (stock.get("watch_only") or not _still_needed(stock, filled)):
                 continue
             saved = cached.get(stock["symbol"])
             if saved and saved["iv30"] == round(scan["iv30"], 1):
                 company = norm_name(saved["name"])
-                if company not in seen_companies:
+                if is_watched or company not in seen_companies:
                     rows.append(saved)
                     seen_companies.add(company)
                     filled.update(v for v in VIEWS if _in_view(saved, *v, hq_known=True))
                 continue
             band = cap_band(stock["market_cap_usd"])
-            if lookups[band] >= config.MAX_DETAIL_LOOKUPS:
+            if not is_watched and lookups[band] >= config.MAX_DETAIL_LOOKUPS:
                 continue
             progress.emit(activity=f"Downloading company details for {stock['symbol']}")
             info = details.fetch(stock["yahoo"])
             lookups[band] += 1
-            if info is None or config.excluded_industry(info["industry"]):
+            if info is None or (not is_watched and config.excluded_industry(info["industry"])):
                 continue
-            if _market_cap_usd(stock, info) < config.MIN_MARKET_CAP_USD:
+            if not is_watched and _market_cap_usd(stock, info) < config.MIN_MARKET_CAP_USD:
                 continue  # the two sources disagree on size; the stock must clear the floor on both
             caps[stock["symbol"]] = _market_cap_usd(stock, info)
             company = norm_name(info["name"] or stock["name"])
-            if company in seen_companies:
+            if not is_watched and company in seen_companies:
                 continue  # same company on a second line
             seen_companies.add(company)
             if stock["market"] == "US":
@@ -371,12 +376,14 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
             row["news_headlines"] = headlines
             row["news_checked_at"] = datetime.now(MARKET_TZ).isoformat(timespec="seconds")
             row.update(explain.choose(row, headlines, as_of=date.fromisoformat(scan.get("quote_date") or run_date)))
+            row["watch_only"] = bool(stock.get("watch_only") or config.excluded_industry(info["industry"]))
             rows.append(row)
             progress.emit(completed=len(rows), activity=f"Enriched {stock['symbol']}: charts, short interest and news")
             filled.update(v for v in VIEWS if _in_view(row, *v, hq_known=True))
             if len(rows) % 10 == 0:
                 log(f"  {len(rows)} leaders enriched ({sum(lookups.values())} new lookups)")
 
+    logos.apply(rows)
     quote_dates = Counter(r["quote_date"] for r in scans if r["quote_date"])
     stocks = [{**s, "market_cap_usd": caps[s["symbol"]]} for s in universe.values()]
     payload = {
@@ -402,6 +409,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
                 [r for r in scans if cap_band(caps[r["symbol"]]) == band],
             ) for band in config.CAP_BANDS
         },
+        "watchlist": sorted(watched),
         "rows": rows,
     }
     conn.close()

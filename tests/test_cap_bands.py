@@ -63,6 +63,21 @@ class CapBandTests(TempProjectTest):
         reused = json.loads((config.SNAPSHOT_DIR / f'{RUN_DATE}.json').read_text())
         self.assertEqual(reused['rows'], payload['rows'])
 
+    def test_watched_low_iv_stock_bypasses_enrichment_budget_and_cap_floor(self):
+        stocks = self.fixture()
+        infos = {s['symbol']: self.info(s) for s in stocks}
+        infos['MID3']['market_cap'] = 100e6
+        with patch.object(report.watchlist, 'load', return_value=['MID3']), \
+                patch.object(config, 'MAX_DETAIL_LOOKUPS', 0), \
+                patch.object(details, 'fetch', side_effect=lambda symbol: infos[symbol]), \
+                patch.object(report.borrow, 'load', return_value={}), patch.object(report, '_bootstrap_history'), \
+                patch.object(report.prices, 'fetch', return_value=(None, {})), \
+                patch.object(report.news, 'fetch', return_value=[]), patch.object(report, 'log'):
+            report.build(RUN_DATE)
+        payload = json.loads((config.SNAPSHOT_DIR / f'{RUN_DATE}.json').read_text())
+        self.assertEqual([row['symbol'] for row in payload['rows']], ['MID3'])
+        self.assertEqual(payload['watchlist'], ['MID3'])
+
     def test_cache_from_another_scan_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'Cached enrichment'):
             report.build(RUN_DATE, cached_snapshot={'run_date': '2026-09-17'})

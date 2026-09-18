@@ -1,5 +1,7 @@
 """Launcher workflow, progress and local HTTP boundaries without market requests."""
 import json
+from datetime import datetime
+import shutil
 from pathlib import Path
 import tempfile
 import threading
@@ -79,6 +81,50 @@ class AppTests(unittest.TestCase):
         self.assertEqual(self.app.state['total'], 20)
         self.assertIn('working', self.app.state['logs'])
 
+    def test_schedule_persists_and_runs_once_after_time_even_after_restart(self):
+        self.app.save_settings({'mode': 'auto', 'time': '11:00'})
+        self.app.update(status='idle', ready=True)
+        with patch('highiv.app.threading.Thread'):
+            self.assertFalse(self.app.scheduled_tick(datetime(2026, 9, 18, 10, 59)))
+            self.assertTrue(self.app.scheduled_tick(datetime(2026, 9, 18, 11, 0)))
+            self.app.update(status='error')
+            self.assertFalse(self.app.scheduled_tick(datetime(2026, 9, 18, 12, 0)))
+            restarted = App(self.app.root)
+            restarted.update(status='idle', ready=True)
+            self.assertFalse(restarted.scheduled_tick(datetime(2026, 9, 18, 18, 0)))
+            self.assertFalse(restarted.scheduled_tick(datetime(2026, 9, 19, 18, 0)))
+            self.assertTrue(restarted.scheduled_tick(datetime(2026, 9, 21, 18, 0)))
+
+    def test_schedule_does_not_overlap_manual_download_or_run_when_disabled(self):
+        now = datetime(2026, 9, 18, 18, 0)
+        self.app.update(status='idle', ready=True)
+        self.assertFalse(self.app.scheduled_tick(now))
+        self.app.save_settings({'mode': 'auto', 'time': '16:30'})
+        self.app.update(status='running')
+        self.assertFalse(self.app.scheduled_tick(now))
+        self.assertIsNone(self.app.settings['last_scheduled_date'])
+        self.app.update(status='idle')
+        with patch('highiv.app.threading.Thread'):
+            self.assertTrue(self.app.scheduled_tick(now))
+
+    def test_invalid_schedule_does_not_replace_saved_settings(self):
+        for bad in ({'mode':'auto','time':'25:00'}, {'mode':'invalid','time':'11:00'},
+                    {'mode':'auto','time':'1:00'}, {'mode':'auto','time':None}, []):
+            with self.assertRaises(ValueError):
+                self.app.save_settings(bad)
+        self.assertEqual(self.app.settings['mode'], 'manual')
+
+    def test_completion_event_only_after_success(self):
+        (self.app.root/'output').mkdir()
+        (self.app.root/'output/dashboard.html').write_text('saved')
+        self.app.started = 1
+        with patch.object(self.app, 'run_process', side_effect=RuntimeError('failed')):
+            self.app.download('refresh')
+        self.assertNotIn('completion_id', self.app.snapshot())
+        with patch.object(self.app, 'run_process'):
+            self.app.download('refresh')
+        self.assertTrue(self.app.snapshot()['completion_id'])
+
 
 class HTTPTests(unittest.TestCase):
     def setUp(self):
@@ -87,6 +133,7 @@ class HTTPTests(unittest.TestCase):
         self.app = App(Path(self.tmp.name))
         (self.app.root/'templates').mkdir()
         (self.app.root/'templates/launcher.html').write_text('Welcome')
+        shutil.copy2(Path(__file__).resolve().parents[1]/'templates/app-controls.html', self.app.root/'templates/app-controls.html')
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), handler(self.app))
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.addCleanup(self.server.server_close)
@@ -130,3 +177,29 @@ class HTTPTests(unittest.TestCase):
         self.assertIn(b'href="/download"', body)
         self.assertEqual(self.request('GET', '/download'), (200, b'Welcome'))
         self.assertEqual(self.request('GET', '/dashboard.html'), (status, body))
+
+    def test_settings_endpoint_requires_local_authorization(self):
+        body = json.dumps({'mode': 'auto', 'time': '11:00'})
+        self.assertEqual(self.request('POST', '/api/settings', body)[0], 403)
+        good = {'Origin': self.origin, 'X-App-Token': self.app.token}
+        self.assertEqual(self.request('POST', '/api/settings', body, good)[0], 200)
+        self.assertEqual(self.app.settings['time'], '11:00')
+        self.assertEqual(self.request('POST', '/api/settings', '[]', good)[0], 400)
+        self.assertEqual(self.request('POST', '/api/settings', '{"mode":"auto","time":"99:00"}', good)[0], 400)
+
+    def test_saved_report_gets_current_controls_and_cached_webp_without_market_refresh(self):
+        templates = Path(__file__).resolve().parents[1]/'templates'
+        for name in ('dashboard.html', 'dashboard.js', 'dashboard.css', 'favicon.svg'):
+            shutil.copy2(templates/name, self.app.root/'templates'/name)
+        (self.app.root/'output').mkdir()
+        report = self.app.root/'output/dashboard.html'
+        original = '<html><body><script id="payload" type="application/json">{"rows":[{"symbol":"AAPL"}]}</script></body></html>'
+        report.write_text(original)
+        (self.app.root/'data/logos').mkdir(parents=True)
+        (self.app.root/'data/logos/AAPL.webp').write_bytes(b'webp')
+        status, body = self.request('GET', '/')
+        self.assertEqual(status, 200)
+        self.assertIn(b'id="local-controls"', body)
+        self.assertIn(b'id="cap-watch"', body)
+        self.assertIn(b'"logo_webp": "d2VicA=="', body)
+        self.assertEqual(report.read_text(), original)

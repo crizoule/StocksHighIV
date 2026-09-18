@@ -27,6 +27,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     },
     universe: { total: 1, us: 1, tsx_only: 0, with_iv: 1, median_iv: 40, interlisted: 0 },
     rows: options.rows || [row],
+    watchlist: options.watchlist || [],
     universe_by_cap: options.stats,
   };
   const elements = new Map();
@@ -215,4 +216,17 @@ test('legacy snapshots do not invent retrieval dates', () => {
   assert.match(collapsed, /SI date unavailable/);
   assert.match(collapsed, /0 available/);
   assert.doesNotMatch(collapsed, /Fetched Sep/);
+});
+
+test('watchlist keeps favorites outside cap and location filters',()=>{
+  const result=renderEarnings(null, {symbol:'FAV',market_cap_usd:1e8,iv30:5,watch_only:true}, {saved:{cap:'watch',market:'tsx',hqOnly:true},watchlist:['FAV','MISSING']});
+  assert.match(result.collapsed,/FAV/);
+});
+test('logos render as small embedded WebP with initials fallback',()=>{
+  const withLogo=renderEarnings(null,{logo_webp:'UklGRg=='});
+  assert.match(withLogo.collapsed,/data:image\/webp;base64,UklGRg==/);
+  assert.match(withLogo.collapsed,/width="24" height="24"/);
+  const missing=renderEarnings(null,{logo_webp:null});
+  assert.match(missing.collapsed,/logo-initials/);
+  assert.doesNotMatch(missing.collapsed,/data:image\/webp/);
 });

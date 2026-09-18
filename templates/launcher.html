@@ -15,7 +15,7 @@
 <div class="stats"><div><span id="rate-label">Download pace</span><strong id="rate">—</strong><span>companies per minute</span></div><div><span>Elapsed</span><strong id="elapsed">0s</strong><span>this run</span></div><div><span>Scan time remaining</span><strong id="eta">—</strong><span id="eta-note">Estimate after five stocks</span></div></div>
 <p id="heartbeat" class="muted"></p><p id="quality" class="muted"></p>
 <details id="log-details"><summary>Activity log</summary><pre id="log">No activity yet.</pre></details></section>
-<footer>Opening the app does not start a new market scan. Refresh downloads current available data; Resume skips stocks already checked today and retries failures. Quotes are delayed and collected sequentially. Short-interest figures have their own reporting dates. The existing dashboard remains available during a refresh.</footer>
+<footer>Manual mode starts scans only when you choose Download. Automatic mode follows your saved weekday schedule. Refresh downloads current available data; Resume skips stocks already checked today and retries failures. Quotes are delayed and collected sequentially. Short-interest figures have their own reporting dates. The existing dashboard remains available during a refresh.</footer>
 </main><script>
 const $=id=>document.getElementById(id);let token='',pending=false,previousStatus='';
 const duration=s=>{if(s==null)return '—';s=Math.max(0,Math.round(s));return s>=3600?`${Math.floor(s/3600)}h ${Math.floor(s%3600/60)}m`:s>=60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;};

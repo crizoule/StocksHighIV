@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import re
+from datetime import datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import hashlib
 import json
 import os
@@ -15,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 import webbrowser
 
-from . import config
+from . import config, watchlist
 
 APP_ID = 'stockshighiv-local-v1'
 
@@ -27,6 +31,14 @@ class App:
         self.token = secrets.token_urlsafe(32)
         self.lock = threading.RLock()
         self.process = None
+        self.stop_scheduler = threading.Event()
+        self.settings = {'mode': 'manual', 'time': '16:30', 'last_scheduled_date': None}
+        try:
+            saved_settings = json.loads((self.root/'data/launcher-settings.json').read_text())
+            self.validate_settings(saved_settings)
+            self.settings.update(saved_settings)
+        except (OSError, ValueError, TypeError):
+            pass
         self.closing = False
         self.started = self.phase_started = None
         self.last_activity = time.monotonic()
@@ -61,10 +73,75 @@ class App:
             eta = (total - count) / (rate / 60) if rate and count >= 5 and total else None
             saved = self.root / 'output/dashboard.html'
             return {**self.state, 'logs': list(self.state['logs']), 'app': APP_ID,
+                    'settings': dict(self.settings), 'watchlist': watchlist.load(self.root),
                     'identity': self.identity, 'token': self.token, 'elapsed': elapsed,
                     'rate': rate, 'eta': eta, 'last_activity_seconds': now-self.last_activity,
                     'has_dashboard': saved.exists(),
                     'dashboard_saved_at': saved.stat().st_mtime if saved.exists() else None}
+
+    @staticmethod
+    def validate_settings(settings):
+        if not isinstance(settings, dict) or settings.get('mode') not in ('manual', 'auto'):
+            raise ValueError('Choose manual or automatic downloads.')
+        value = settings.get('time', '')
+        if not isinstance(value, str) or len(value) != 5 or value[2] != ':':
+            raise ValueError('Choose a valid time.')
+        try:
+            hour, minute = map(int, value.split(':'))
+        except ValueError:
+            raise ValueError('Choose a valid time.') from None
+        if not (0 <= hour < 24 and 0 <= minute < 60) or value != f'{hour:02}:{minute:02}':
+            raise ValueError('Choose a valid time.')
+
+    def persist_settings(self, settings):
+        path = self.root/'data/launcher-settings.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(settings), encoding='utf-8')
+        os.replace(temporary, path)
+        self.settings = settings
+
+    def save_settings(self, settings):
+        self.validate_settings(settings)
+        with self.lock:
+            self.persist_settings({**self.settings, 'mode': settings['mode'], 'time': settings['time']})
+
+    def eastern_now(self):
+        try:
+            zone = ZoneInfo('America/New_York')
+        except ZoneInfoNotFoundError:
+            # The launcher itself uses system Python. On Windows the installed
+            # tzdata package is in the app's venv, not system Python's search path.
+            candidates = list((self.root/'.venv').glob('**/tzdata/zoneinfo/America/New_York'))
+            if not candidates:
+                raise RuntimeError('Time-zone data is not installed yet.')
+            with candidates[0].open('rb') as source:
+                zone = ZoneInfo.from_file(source)
+        return datetime.now(zone)
+
+    def scheduled_tick(self, now=None):
+        with self.lock:
+            if self.closing or not self.state['ready'] or self.settings['mode'] != 'auto':
+                return False
+            if self.state['status'] in ('setup', 'running'):
+                return False
+            now = now or self.eastern_now()
+            day = now.date().isoformat()
+            if now.weekday() >= 5 or now.strftime('%H:%M') < self.settings['time']:
+                return False
+            if self.settings.get('last_scheduled_date') == day:
+                return False
+            # Persist before starting, so restart or a failed download cannot
+            # trigger a retry loop. Manual Resume remains available after errors.
+            self.persist_settings({**self.settings, 'last_scheduled_date': day})
+            return self.start('refresh')
+
+    def scheduler_loop(self):
+        while not self.stop_scheduler.wait(15):
+            try:
+                self.scheduled_tick()
+            except Exception as exc:
+                self.log(f'Automatic download could not start: {exc}')
 
     def run_process(self, command, *, events=False):
         env = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
@@ -100,7 +177,7 @@ class App:
             marker = self.root / '.venv/.highiv-requirements'
             valid = marker.exists() and marker.read_text() == fingerprint
             if valid:
-                result = subprocess.run([str(self.python), '-c', 'import httpx,yfinance,pandas,openpyxl,tzdata'],
+                result = subprocess.run([str(self.python), '-c', 'import httpx,yfinance,pandas,openpyxl,tzdata,PIL'],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 valid = result.returncode == 0
             if not valid:
@@ -142,7 +219,7 @@ class App:
             self.run_process(command, events=True)
             if not (self.root/'output/dashboard.html').exists():
                 raise RuntimeError('The download ended without producing a dashboard.')
-            self.update(status='done', phase='done', activity='Dashboard updated — ready to open',
+            self.update(completion_id=str(time.time_ns()), status='done', phase='done', activity='Dashboard updated — ready to open',
                         elapsed=time.monotonic()-self.started)
         except Exception as exc:
             self.log(str(exc))
@@ -152,6 +229,7 @@ class App:
     def close(self):
         with self.lock:
             self.closing = True
+            self.stop_scheduler.set()
             proc = self.process
         if proc and proc.poll() is None:
             proc.terminate()
@@ -191,6 +269,7 @@ def handler(app):
             files = {'/': (landing, 'text/html; charset=utf-8'),
                      '/download': ('templates/launcher.html', 'text/html; charset=utf-8'),
                      '/dashboard.html': ('output/dashboard.html', 'text/html; charset=utf-8'),
+                     '/app-controls.js': ('templates/app-controls.js', 'text/javascript; charset=utf-8'),
                      '/favicon.svg': ('templates/favicon.svg', 'image/svg+xml')}
             if path not in files:
                 return self.send(404, '{}')
@@ -198,13 +277,32 @@ def handler(app):
             try:
                 body = (app.root/filename).read_bytes()
                 if filename == 'output/dashboard.html':
-                    navigation = (
-                        '<nav aria-label="Local app" style="padding:12px 24px;background:#dfe5fb;'
-                        'color:#122120;font:14px system-ui;display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
-                        '<a href="/download" style="color:#2338ad;font-weight:600">Refresh data / download progress</a>'
-                        '<span>Showing your saved market data</span></nav>'
-                    ).encode('utf-8')
-                    body = body.replace(b'<body>', b'<body>'+navigation, 1)
+                    # Upgrade presentation while retaining the exact saved market data.
+                    payload_match = re.search(rb'<script id="payload" type="application/json">(.*?)</script>', body, re.S)
+                    if payload_match:
+                        saved_payload = json.loads(payload_match[1])
+                        for row in saved_payload.get('rows', []):
+                            symbol = row.get('yahoo_symbol') or row.get('symbol', '')
+                            if not row.get('logo_webp') and re.fullmatch(r'[A-Z0-9.\-]{1,24}', symbol):
+                                logo = app.root/'data/logos'/(symbol+'.webp')
+                                try:
+                                    if logo.stat().st_size <= 12000:
+                                        row['logo_webp'] = base64.b64encode(logo.read_bytes()).decode('ascii')
+                                except OSError:
+                                    pass
+                        saved_json = json.dumps(saved_payload, ensure_ascii=False).replace('</', '<\\/')
+                        template = (app.root/'templates/dashboard.html').read_text()
+                        template = template.replace('/*__CSS__*/', (app.root/'templates/dashboard.css').read_text())
+                        template = template.replace('/*__JS__*/', (app.root/'templates/dashboard.js').read_text())
+                        template = template.replace('__DATA_JSON__', saved_json)
+                        template = template.replace('__FAVICON_BASE64__', base64.b64encode((app.root/'templates/favicon.svg').read_bytes()).decode())
+                        body = ('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>' + template + '</body></html>').encode('utf-8')
+                if content_type.startswith('text/html') and b'<body>' in body:
+                    controls = (app.root/'templates/app-controls.html').read_bytes()
+                    saved = app.root/'output/dashboard.html'
+                    stamp = str(saved.stat().st_mtime if saved.exists() else 0).encode()
+                    controls = controls.replace(b'REPORT_STAMP', stamp)
+                    body = body.replace(b'<body>', b'<body>'+controls, 1)
                 self.send(200, body, content_type)
             except FileNotFoundError:
                 self.send(404, 'No dashboard yet. Return to the start page to download data.', 'text/plain')
@@ -213,16 +311,26 @@ def handler(app):
             expected_origin = f'http://127.0.0.1:{self.server.server_port}'
             if not self.local_host() or self.headers.get('Origin') != expected_origin or not secrets.compare_digest(self.headers.get('X-App-Token', ''), app.token):
                 return self.send(403, '{}')
-            if self.path != '/api/start':
+            if self.path not in ('/api/start', '/api/settings', '/api/watchlist'):
                 return self.send(404, '{}')
             try:
                 length = int(self.headers.get('Content-Length', 0))
                 if not 0 < length <= 1000:
                     raise ValueError()
-                action = json.loads(self.rfile.read(length)).get('action')
+                payload = json.loads(self.rfile.read(length))
+                if self.path == '/api/watchlist':
+                    with app.lock:
+                        symbols = watchlist.change(app.root, payload.get('symbol'), payload.get('action'))
+                    return self.send(200, json.dumps({'watchlist': symbols}))
+                if self.path == '/api/settings':
+                    app.save_settings(payload)
+                    return self.send(200, '{}')
+                action = payload.get('action')
                 if action not in ('refresh', 'resume', 'setup'):
                     raise ValueError()
-            except (ValueError, AttributeError):
+            except OSError:
+                return self.send(500, json.dumps({'error': 'Could not save settings.'}))
+            except (ValueError, AttributeError, TypeError):
                 return self.send(400, '{}')
             self.send(202 if app.start(action) else 409, '{}')
     return Handler
@@ -251,6 +359,7 @@ def main():
         raise SystemExit(f'Port {args.port} is in use. Close the other app or run: python launch.py --port 8933')
     print(f'StocksHighIV: {url}\nKeep this window open. Press Ctrl+C to stop. Downloads resume after interruption.', flush=True)
     threading.Thread(target=app.setup, daemon=True).start()
+    threading.Thread(target=app.scheduler_loop, daemon=True).start()
     if not args.no_browser:
         webbrowser.open(url)
     try:

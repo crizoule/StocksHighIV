@@ -16,3 +16,4 @@ htmlcov/
 .agents/
 data/
 output/
+dist/

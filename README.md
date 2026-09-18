@@ -16,21 +16,33 @@ Generated market data, snapshots, logs, backups and HTML reports are local runti
 
 ## Easy launch (Windows or Mac)
 
+**Mac users:** [Download the signed and Apple-notarized app](https://github.com/crizoule/StocksHighIV/releases/latest/download/StocksHighIV-macOS.zip), extract it, and open **StocksHighIV.app**. Supports Intel and Apple Silicon on macOS 12+. Install Python 3.11+ from python.org first. The app opens the dashboard in your browser; quit it from the Dock/menu when finished. A normal first-open confirmation may appear. GitHub’s source ZIP contains the development launchers, not the notarized app.
+
+Developer build instructions are in [packaging/macos](packaging/macos/README.md). The source-based steps below also support Windows.
+
 1. Download the GitHub ZIP and **extract the entire folder** (or clone the repository).
 2. Install **Python 3.11 or newer** from [python.org](https://www.python.org/downloads/) if needed. On Windows, enable **Add Python to PATH** during installation.
 3. Double-click **Start StocksHighIV.bat** on Windows or **Start StocksHighIV.command** on Mac.
 4. Your browser opens **the saved dashboard directly** at **http://127.0.0.1:8932/**. On the first launch, when no saved data exists, it shows the setup/download page instead. Dependency setup runs automatically. Use **Refresh data / download progress** above the dashboard whenever you want to update it.
 5. Click **Download market data**. The page shows the current stock/provider, completed and total quotes, measured companies per minute, elapsed time, scan ETA, failures, and provider retry/backoff messages. Enrichment shows completed companies without inventing a fixed total or ETA.
 
-A first download usually takes about an hour, depending on provider response times. Opening the launcher does **not** automatically scan. **Open saved dashboard** remains available while refreshing; the final report replaces the old one atomically. **Refresh market data** starts a fresh scan; **Resume unfinished download** reuses completed stocks from today and retries unfinished/failed requests, including after an interrupted refresh. Enrichment restarts when resuming. This is a local application, not a public web server; it binds only to `127.0.0.1`.
+A first download usually takes about an hour, depending on provider response times. Downloads default to **Manual**. Under **Download schedule & notifications**, choose **Automatic** for weekdays at **11:00 AM ET**, **4:30 PM ET (after close)**, or a custom Eastern time. Settings persist across restarts. The app must be running and the computer awake; reopening after the scheduled time catches up once that weekday. Weekends are skipped, but exchange holidays are not excluded. Failed scheduled runs are not automatically retried; use Resume. **Open saved dashboard** remains available while refreshing; the final report replaces the old one atomically. **Refresh market data** starts a fresh scan; **Resume unfinished download** reuses completed stocks from today and retries unfinished/failed requests, including after an interrupted refresh. Enrichment restarts when resuming. This is a local application, not a public web server; it binds only to `127.0.0.1`.
 
-Keep the launcher window open. Ctrl+C stops the server and its download process; relaunch and choose Resume to continue. Reopening the launcher while it is already running opens the existing app. A closed browser tab does not stop the download.
+Keep the launcher window open. Ctrl+C stops the server and its download process; relaunch and choose Resume to continue. Reopening the launcher while it is already running opens the existing app. A closed browser tab does not stop the download. The previous dashboard stays visible during updates; a completion banner links to the new report. Enable browser notifications from the schedule panel to receive an additional alert while a dashboard/progress tab is open. Browser permission is required.
 
 macOS may block the downloaded, unsigned `.command` launcher on first use. If you trust your downloaded copy, follow [Apple’s instructions](https://support.apple.com/en-gb/102445): dismiss the warning, then use **System Settings → Privacy & Security → Open Anyway** for this launcher. Changing the landing page does not remove this macOS approval requirement.
 
 If the Mac ZIP extraction drops execute permission, run `chmod +x "Start StocksHighIV.command"` once from the extracted folder. You can also launch directly with `python3 launch.py` (Mac) or `py -3 launch.py` (Windows). If port 8932 is occupied by another application, use `python3 launch.py --port 8933` (or `py -3` on Windows). Failed dependency installation can be retried from the page after fixing the internet connection or Python installation. The `.venv` directory belongs to this machine; do not copy it between Windows and Mac.
 
 The command-line examples below use Mac/Linux paths; on Windows replace `.venv/bin/python` with `.venv\Scripts\python.exe`.
+
+## Company logos
+
+Displayed companies use 48-pixel WebP logos (shown at 24 pixels), cached in `data/logos` for 90 days and embedded in saved dashboards for offline use. Images come from Financial Modeling Prep using the full listing symbol. Missing logos fall back to ticker initials and are retried after a day. Source downloads are capped at 256 KB and encoded icons at 12 KB; no API key is required for this image endpoint. Logo availability depends on the provider.
+
+## Watchlist
+
+Use the star beside a ticker or the Watchlist panel to save up to 100 favorites. The Watchlist tab shows their available data independently of the top-100 rankings, cap bands, and location filters. Favorites are stored in `data/watchlist.json` (shared across Mac app versions). US symbols and Canadian Yahoo symbols such as `SHOP.TO` are supported. New additions enter the next Refresh or Resume; additions during a scan may require the next run. Watched stocks bypass cap and industry exclusions for the watchlist only. Missing IV or failed enrichment is indicated without inventing values. Removing a favorite stops forced inclusion in future scans. Changes require the local app; exported HTML shows the watchlist saved in its snapshot.
 
 ## Run
 

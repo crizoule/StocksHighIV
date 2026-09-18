@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import partial
 from zoneinfo import ZoneInfo
 
-from . import config, iv, net, store, universe, progress
+from . import config, iv, net, store, universe, progress, watchlist
 
 MARKET_TZ = ZoneInfo("America/Toronto")
 log = partial(print, flush=True)
@@ -24,8 +24,10 @@ def load_universe(client, run_date: str, refresh: bool = False) -> list[dict]:
     if path.exists() and not refresh:
         cached = json.loads(path.read_text())
         if cached.get("run_date") == run_date:
-            return cached["stocks"]
-    stocks = universe.build_universe(client)
+            stocks = watchlist.include(cached["stocks"], watchlist.load())
+            path.write_text(json.dumps({"run_date": run_date, "stocks": stocks}))
+            return stocks
+    stocks = watchlist.include(universe.build_universe(client), watchlist.load())
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"run_date": run_date, "stocks": stocks}))
     return stocks

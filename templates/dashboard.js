@@ -3,9 +3,10 @@
 
   const DATA = JSON.parse(document.getElementById("payload").textContent);
   const S = DATA.settings;
+  let watched = new Set(DATA.watchlist || []);
   let U = DATA.universe;
   const CAP_SPLIT = S.large_market_cap_usd || 100e9;
-  const CAP_LABEL = { mid: "US$1B–$100B", large: "US$100B+" };
+  const CAP_LABEL = { mid: "US$1B–$100B", large: "US$100B+", watch: "Watchlist" };
   const TOP_N = S.top_n;
   const FRAMES = S.price_frames || ["1H", "4H", "1D", "1W"];
   const FRAME_NOTE = {
@@ -21,7 +22,7 @@
   const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set() };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
-    if (saved && ["mid", "large"].includes(saved.cap)) state.cap = saved.cap;
+    if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
     if (saved && ["all", "us", "tsx"].includes(saved.market)) state.market = saved.market;
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
@@ -74,13 +75,13 @@
   /* ---------- views ---------- */
   const onTsx = (r) => r.market === "CA" || Boolean(r.also_listed);
   const inView = (r) =>
-    isNum(r.market_cap_usd) && r.market_cap_usd >= S.min_market_cap_usd &&
+    !r.watch_only && isNum(r.market_cap_usd) && r.market_cap_usd >= S.min_market_cap_usd &&
     (state.cap === "large" ? r.market_cap_usd >= CAP_SPLIT : r.market_cap_usd < CAP_SPLIT) &&
     !(state.market === "us" && r.market !== "US") &&
     !(state.market === "tsx" && !onTsx(r)) &&
     !(state.hqOnly && !r.hq_north_america);
   const viewRows = () =>
-    DATA.rows.filter(inView).sort((a, b) => b.iv30 - a.iv30).slice(0, TOP_N).map((r, i) => ({ ...r, rank: i + 1 }));
+    DATA.rows.filter(state.cap === "watch" ? r => watched.has(r.symbol) : inView).sort((a, b) => b.iv30 - a.iv30).slice(0, state.cap === "watch" ? Infinity : TOP_N).map((r, i) => ({ ...r, rank: i + 1 }));
 
   const SQUEEZE_ORDER = { high: 3, elevated: 2, low: 1, unknown: 0 };
   const WHY_ORDER = { news: 2, earnings: 1, none: 0 };
@@ -267,6 +268,12 @@
       `<span class="sub">${r.earnings_in_days <= 7 ? `<span class="chip hot">${countdown}</span>` : countdown}</span>`;
   };
 
+  const logoHtml = (r) => {
+    const image = typeof r.logo_webp === "string" && /^[A-Za-z0-9+/]+={0,2}$/.test(r.logo_webp) && r.logo_webp.length <= 16000;
+    return image ? `<img class="company-logo" src="data:image/webp;base64,${r.logo_webp}" width="24" height="24" alt="" loading="lazy" decoding="async" title="Company logo · Financial Modeling Prep">`
+      : `<span class="company-logo logo-initials" aria-hidden="true">${esc(r.symbol.slice(0, 2))}</span>`;
+  };
+
   const rowHtml = (r, maxIv) => {
     const open = state.open.has(r.symbol);
     const chips = `<span class="chip">${esc(r.exchange)}</span>` +
@@ -294,7 +301,7 @@
     const dtc = isNum(r.days_to_cover) ? `<span class="val">${nf1.format(r.days_to_cover)}</span><span class="sub">days</span>` : `<span class="muted">—</span>`;
 
     return `<tr class="row" tabindex="0" aria-expanded="${open}" data-symbol="${esc(r.symbol)}">` +
-      `<td class="col-stock"><div class="stock"><span class="rank">${r.rank}</span><div><div class="tick"><span class="sym">${esc(r.symbol)}</span>${chips}</div><div class="nm">${esc(r.name)}</div>${r.business ? `<div class="biz">${esc(r.business)}</div>` : ""}</div></div></td>` +
+      `<td class="col-stock"><div class="stock"><span class="rank">${r.rank}</span><div><div class="tick"><button type="button" data-watch="${esc(r.symbol)}" aria-label="${watched.has(r.symbol) ? "Remove from" : "Add to"} watchlist" aria-pressed="${watched.has(r.symbol)}">${watched.has(r.symbol) ? "★" : "☆"}</button>${logoHtml(r)}<span class="sym">${esc(r.symbol)}</span>${chips}</div><div class="nm">${esc(r.name)}</div>${r.business ? `<div class="biz">${esc(r.business)}</div>` : ""}</div></div></td>` +
       `<td class="col-industry">${industryCell(r)}</td>` +
       `<td class="col-iv"><div class="ivline"><span class="big">${nf1.format(r.iv30)}<small>%</small></span>${change}</div><span class="bar"><i style="width:${Math.max(2, (r.iv30 / maxIv) * 100)}%"></i></span></td>` +
       `<td class="col-why">${whyCell(r)}</td>` +
@@ -546,10 +553,13 @@
       CAP_LABEL[state.cap],
       MARKET_LABEL[state.market],
       state.hqOnly ? "US/Canada HQ only" : "any HQ country",
-      S.excluded_short,
+      state.cap === "watch" ? "all watched tickers · no cap or location filters" : S.excluded_short,
       "select a row for details",
     ].filter(Boolean).join(" · ");
+    $("dist-frame").hidden = state.cap === "watch";
+    $("dist-note").hidden = state.cap === "watch";
     renderFigures(view);
+    if (state.cap === "watch") $("figures").innerHTML = `<div class="figure">${watched.size} watched tickers · ${view.length} with data in this report. Stars save your favorites on this computer.</div>`;
     drawDistribution(view.length ? view[view.length - 1].iv30 : null);
     document.querySelectorAll("th[data-sort]").forEach((th) => {
       const active = th.dataset.sort === state.sort.key;
@@ -571,7 +581,7 @@
   const renderStatic = () => {
     const updated = stamp.format(new Date(DATA.generated_at));
     const cap = compact(S.min_market_cap_usd, "US$");
-    $("lede").textContent = `The top ${TOP_N} stocks by 30-day implied volatility in the ${CAP_LABEL[state.cap]} market-cap band, drawn from ${nf0.format(U.total)} US and Canadian listings. Each tab has the same data, charts and filters.`;
+    $("lede").textContent = state.cap === "watch" ? `Your favorite tickers, independent of market cap and IV rank. ${[...watched].filter(symbol => !DATA.rows.some(r => r.symbol === symbol)).join(", ") || "No tickers"} without available data in this report (newly added, missing IV, or a provider failure). Add or remove tickers in the watchlist controls above. New additions enter the next download; unavailable quotes are never invented.` : `The top ${TOP_N} stocks by 30-day implied volatility in the ${CAP_LABEL[state.cap]} market-cap band, drawn from ${nf0.format(U.total)} US and Canadian listings. Each tab has the same data, charts and filters.`;
     $("session").innerHTML = [
       ["Session", longDate.format(day(DATA.quote_date))],
       ["Updated", updated],
@@ -726,7 +736,17 @@
     const again = document.querySelector(`tr.row[data-symbol="${CSS.escape(symbol)}"]`);
     if (again) again.focus({ preventScroll: true });
   };
-  $("rows").addEventListener("click", (ev) => {
+  $("rows").addEventListener("click", async (ev) => {
+    const star = ev.target.closest("button[data-watch]");
+    if (star) {
+      try {
+        const status = await (await fetch("/api/status")).json();
+        const response = await fetch("/api/watchlist", {method:"POST", headers:{"Content-Type":"application/json", "X-App-Token":status.token}, body:JSON.stringify({symbol:star.dataset.watch, action:watched.has(star.dataset.watch) ? "remove" : "add"})});
+        if (!response.ok) throw Error();
+        watched = new Set((await response.json()).watchlist); render();
+      } catch { alert("Open the dashboard through the local app to save watchlist changes."); }
+      return;
+    }
     if (ev.target.closest("a")) return;
     const tr = ev.target.closest("tr.row");
     if (tr) toggleRow(tr.dataset.symbol);
@@ -740,5 +760,6 @@
 
   if ("ResizeObserver" in window) new ResizeObserver(() => drawDistribution(lastCutoff)).observe($("dist-frame"));
 
+  window.addEventListener("highiv-watchlist", event => { watched = new Set(event.detail); render(); });
   render();
 })();

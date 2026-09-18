@@ -1,0 +1,18 @@
+<section id="local-controls" data-report-stamp="REPORT_STAMP" style="padding:14px 24px;background:#dfe5fb;color:#122120;font:14px system-ui;border-bottom:1px solid #bac6ea">
+<style>#local-controls a{color:#2338ad}#local-controls button,#local-controls select,#local-controls input{font:inherit;padding:7px 10px;border:1px solid #b4bfdc;border-radius:6px;margin:4px;color:#122120;background:white}#local-controls summary{cursor:pointer}#local-controls [hidden]{display:none!important}</style>
+<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"><a href="/download">Download progress / manual refresh</a><a href="/dashboard.html" id="local-saved">View saved dashboard</a><span id="local-progress" role="status">Connecting…</span></div>
+<div id="local-complete" role="status" aria-live="polite" hidden style="padding:12px 0;font-weight:600">New dashboard ready. <a href="/dashboard.html">Open updated dashboard</a></div>
+<details open><summary>★ Watchlist</summary><form id="local-watch-form"><label>Add ticker <input id="local-watch-symbol" placeholder="AAPL or SHOP.TO" maxlength="20" required></label><button>Add to watchlist</button></form><div id="local-watch-items"></div><p id="local-watch-result" role="status">Favorites are saved on this computer and included in the next scan, even outside the regular rankings. US tickers and Canadian .TO/.V tickers are supported. Unavailable IV is shown as unavailable.</p></details>
+<details style="margin-top:12px"><summary>Download schedule &amp; notifications</summary>
+<form id="local-settings" style="margin-top:10px">
+<label>Downloads <select id="local-mode"><option value="manual">Manual</option><option value="auto">Automatic · weekdays</option></select></label>
+<label>Time <select id="local-preset"><option value="16:30">After close · 4:30 PM ET</option><option value="11:00">11:00 AM ET</option><option value="custom">Custom time</option></select></label>
+<label id="local-custom" hidden>Eastern time <input id="local-time" type="time" value="16:30" required></label>
+<button type="submit">Save schedule</button><span id="local-settings-result" role="status"></span>
+</form>
+<p>Times use Eastern time, including daylight saving. Keep the app running and computer awake. If reopened after the selected time, it runs once for that weekday. Weekends are skipped; market holidays are not excluded. Manual downloads remain available.</p>
+<button id="local-notify" type="button">Enable completion notifications</button><span id="local-notify-result" role="status"></span>
+<p>You’ll always see a completion banner here. Browser notifications require permission and an open dashboard or progress tab. Your previous dashboard stays visible until you open the updated report.</p>
+</details>
+<script src="/app-controls.js" defer></script>
+</section>
