@@ -41,11 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Adds a macro sentiment panel for VIX, Cboe put/call ratios, AAII sentiment, and CNN Fear & Greed, with observation dates and source links. Adds a sortable stock/sector sentiment score and expanded component evidence, formulas, dates, and coverage.
+    notes = '''Adds a Fear & Greed replica built from public data. While CNN's feed works, the CNN card shows the replica as a cross-check. When the feed is blocked or stale, the card shows the replica instead, labelled as not CNN's reading, with all seven components. It uses CNN's own scoring method. Against CNN's published history, it averaged about 3 points apart and gave the same rating on about 4 of 5 days. The first few refreshes download Cboe put/call history, up to 3 minutes each. Until that finishes, the replica runs on six of its seven components.
 
-Missing or stale inputs are excluded. AAII may block automated access; news and social feeds require authorized credentials. Without those feeds, stock scores are explicitly labeled Price only.
+Adds a manual AAII import. AAII blocks automated downloads, so download AAII's weekly spreadsheet in your browser and save it to Downloads; the AAII card links to it. The next refresh reads it. On a Mac, the first read of Downloads may ask for permission.
 
-Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to populate sentiment in an existing saved report.
+Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. The first launch after updating installs one additional Python package.
 
 For a new installation, download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Requires Python 3.11+. The Mac app is signed and Apple-notarized. Windows supports Windows 10/11 x64; the executable is not Authenticode-signed.'''
     subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), str(windows_archive), str(windows_feed), '--repo', REPO,
