@@ -41,7 +41,13 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = 'Mac and Windows launchers with signature-verified in-app updates. Download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Existing users need one manual installation to acquire the updater. Updates wait for active market downloads and preserve local data. Requires Python 3.11+. Windows package supports Windows 10/11 x64 and may show a SmartScreen warning on first launch because it is not Authenticode-signed. The Mac app is Apple-notarized.'
+    notes = '''Adds a macro sentiment panel for VIX, Cboe put/call ratios, AAII sentiment, and CNN Fear & Greed, with observation dates and source links. Adds a sortable stock/sector sentiment score and expanded component evidence, formulas, dates, and coverage.
+
+Missing or stale inputs are excluded. AAII may block automated access; news and social feeds require authorized credentials. Without those feeds, stock scores are explicitly labeled Price only.
+
+Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to populate sentiment in an existing saved report.
+
+For a new installation, download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Requires Python 3.11+. The Mac app is signed and Apple-notarized. Windows supports Windows 10/11 x64; the executable is not Authenticode-signed.'''
     subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), str(windows_archive), str(windows_feed), '--repo', REPO,
                     '--target', commit, '--draft', '--title', f'StocksHighIV {version}', '--notes', notes], check=True)
     subprocess.run(['gh', 'release', 'edit', f'v{version}', '--repo', REPO, '--draft=false', '--latest'], check=True)
