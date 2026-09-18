@@ -120,3 +120,13 @@ class HTTPTests(unittest.TestCase):
             self.assertEqual(self.request('POST', '/api/start', body, good)[0], 202)
             start.assert_called_once_with('refresh')
         self.assertEqual(self.request('POST', '/api/start', '{', good)[0], 400)
+
+    def test_saved_dashboard_opens_directly_and_download_page_remains_accessible(self):
+        (self.app.root/'output').mkdir()
+        (self.app.root/'output/dashboard.html').write_text('<html><body>Saved stocks</body></html>')
+        status, body = self.request('GET', '/')
+        self.assertEqual(status, 200)
+        self.assertIn(b'Saved stocks', body)
+        self.assertIn(b'href="/download"', body)
+        self.assertEqual(self.request('GET', '/download'), (200, b'Welcome'))
+        self.assertEqual(self.request('GET', '/dashboard.html'), (status, body))

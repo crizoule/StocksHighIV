@@ -187,14 +187,25 @@ def handler(app):
             path = self.path.split('?', 1)[0]
             if path == '/api/status':
                 return self.send(200, json.dumps(app.snapshot()))
-            files = {'/': ('templates/launcher.html', 'text/html; charset=utf-8'),
+            landing = 'output/dashboard.html' if (app.root/'output/dashboard.html').exists() else 'templates/launcher.html'
+            files = {'/': (landing, 'text/html; charset=utf-8'),
+                     '/download': ('templates/launcher.html', 'text/html; charset=utf-8'),
                      '/dashboard.html': ('output/dashboard.html', 'text/html; charset=utf-8'),
                      '/favicon.svg': ('templates/favicon.svg', 'image/svg+xml')}
             if path not in files:
                 return self.send(404, '{}')
             filename, content_type = files[path]
             try:
-                self.send(200, (app.root/filename).read_bytes(), content_type)
+                body = (app.root/filename).read_bytes()
+                if filename == 'output/dashboard.html':
+                    navigation = (
+                        '<nav aria-label="Local app" style="padding:12px 24px;background:#dfe5fb;'
+                        'color:#122120;font:14px system-ui;display:flex;gap:16px;align-items:center;flex-wrap:wrap">'
+                        '<a href="/download" style="color:#2338ad;font-weight:600">Refresh data / download progress</a>'
+                        '<span>Showing your saved market data</span></nav>'
+                    ).encode('utf-8')
+                    body = body.replace(b'<body>', b'<body>'+navigation, 1)
+                self.send(200, body, content_type)
             except FileNotFoundError:
                 self.send(404, 'No dashboard yet. Return to the start page to download data.', 'text/plain')
 
