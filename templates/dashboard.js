@@ -115,6 +115,8 @@
         ((c.evidence || []).length ? `<ul class="sentiment-evidence">${c.evidence.map(e => `<li>${sentimentLink(e.url, e.title)} <span>${esc(e.source)} · ${esc(e.as_of)} · tone ${esc(e.score)}</span></li>`).join("")}</ul>` : "") +
         `</article>`).join("")}</div></div>`;
   };
+  const replicaParts = parts => (parts || []).length ? `<ul class="replica-parts">${parts.map(p =>
+    `<li>${esc(p.name)} · ${isNum(p.score) ? `${nf1.format(p.score)} ${esc(p.rating || "")}` : "Unavailable"}<span>${esc(isNum(p.score) ? p.reading : p.detail || "No fresh input")}</span></li>`).join("")}</ul>` : "";
   const renderMacro = () => {
     const defaults = [
       {key:"vix", name:"VIX", url:"https://www.cboe.com/tradable-products/vix/"},
@@ -131,15 +133,24 @@
     $("macro-cards").innerHTML = cards.map(c => {
       const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
       const tone = !c.usable ? "unknown" : c.direction > 0 ? "positive" : c.direction < 0 ? "negative" : "mixed";
+      // A replica is always labelled: it stands in only when CNN has no fresh reading, otherwise it is a cross-check.
+      const replica = c.replica && isNum(c.replica.value) && sentimentFresh(c.replica.as_of, 4) ? c.replica : null;
       return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.reading || "—")}</div>` +
         `<span class="sentiment-badge ${tone}">${esc(stale ? "Stale · excluded" : c.usable ? c.signal : "Unavailable")}</span>` +
-        `<p class="sentiment-meta">${c.as_of ? `As of ${esc(c.as_of)}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? " · week ending" : ""}</p>` +
+        `<p class="sentiment-meta">${c.as_of ? `As of ${esc(c.as_of)}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? ` · ${esc(c.date_label || "week ending")}` : ""}</p>` +
+        (c.source_file ? `<p class="sentiment-meta">From AAII's spreadsheet · ${esc(c.source_file)}</p>` : "") +
+        (c.replica_of ? `<p class="sentiment-meta">Not CNN's reading · CNN feed ${c.cnn_status === "stale" && c.cnn_as_of ? `stale since ${esc(c.cnn_as_of)}` : "unavailable"}</p>` : "") +
+        (replica && c.usable ? `<p class="sentiment-meta">Replica ${nf1.format(replica.value)} · ${replica.value >= c.value ? "+" : "−"}${nf1.format(Math.abs(replica.value - c.value))} vs CNN</p>` : "") +
         (c.ratios ? `<p class="sentiment-meta">Total ${isNum(c.ratios.total) ? nf2.format(c.ratios.total) : "—"} · Index ${isNum(c.ratios.index) ? nf2.format(c.ratios.index) : "—"}</p>` : "") +
         `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No verified reading in this report. The source may block automated access; no substitute value is estimated.")}</p>` +
+        (c.import_url ? `<p>AAII blocks automated downloads. Once a week, ${sentimentLink(c.import_url, "download the AAII spreadsheet")} in your browser and save it to Downloads (or the app's data/imports folder); the next refresh reads it.${c.file_saved ? ` Current file saved ${esc(c.file_saved.slice(0, 10))}.` : ""}</p>` : "") +
+        (c.import_note ? `<p>${esc(c.import_note)}</p>` : "") +
+        (c.replica_of ? `<p>${esc(c.method || "")}</p>${replicaParts(c.components)}` : "") +
+        (replica ? `<p>Replica cross-check · ${esc(replica.coverage)}/7 components · as of ${esc(replica.as_of)}</p>${replicaParts(replica.components)}` : "") +
         (c.observed_at ? `<p>Provider timestamp: ${esc(c.observed_at)}</p>` : "") +
         (c.fetched_at ? `<p>${esc(fetchedLabel(c.fetched_at))}</p>` : "") +
         (c.status === "cached" ? "<p>Last good observation retained; latest refresh failed.</p>" : "") +
-        `${sentimentLink(c.url, "Open provider")}</details></article>`;
+        `${sentimentLink(c.url, c.replica_of ? "CNN's index, for comparison" : "Open provider")}</details></article>`;
     }).join("");
   };
 

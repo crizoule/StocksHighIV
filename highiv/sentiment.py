@@ -12,26 +12,33 @@ import math
 import os
 import re
 import tempfile
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from html.parser import HTMLParser
 from urllib.parse import quote
 
 import httpx
+import pandas as pd
 import yfinance as yf
 
-from . import config, context, progress
+from . import aaii, config, context, fear_greed, net, progress
 
 VIX_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
 PC_URL = "https://www.cboe.com/us/options/market_statistics/daily/"
 AAII_URL = "https://www.aaii.com/sentimentsurvey"
 CNN_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+CNN_PAGE = "https://www.cnn.com/markets/fear-and-greed"
 MACRO = {
     "vix": ("VIX", VIX_URL, 4),
     "put_call": ("Put/call ratios", PC_URL, 4),
     "aaii": ("AAII sentiment", AAII_URL, 10),
-    "cnn": ("CNN Fear & Greed", "https://www.cnn.com/markets/fear-and-greed", 2),
+    "cnn": ("CNN Fear & Greed", CNN_PAGE, 2),
 }
+REPLICA_MAX_AGE = 4
+REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
+PUT_CALL_BACKFILL_SECONDS = 180   # Cboe history fills over a few refreshes, never in one long burst
 SECTORS = {
     "technology": "XLK", "financial services": "XLF", "financials": "XLF",
     "healthcare": "XLV", "health care": "XLV", "consumer cyclical": "XLY",
@@ -151,11 +158,7 @@ def parse_aaii(html, today):
     bull, neutral, bear = [number(v, 0, 100) for v in values]
     if abs(bull + neutral + bear - 100) > 0.3:
         raise ValueError("AAII percentages do not total 100")
-    spread = round(bull - bear, 1)
-    return dict(as_of=when.isoformat(), value=spread, bullish=bull, neutral=neutral, bearish=bear,
-                reading=f"{spread:+.1f} pp", signal="Bullish tilt" if spread > 10 else "Bearish tilt" if spread < -10 else "Mixed",
-                direction=1 if spread > 10 else -1 if spread < -10 else 0,
-                detail=f"Week ending {when}: {bull:g}% bullish / {neutral:g}% neutral / {bear:g}% bearish. Bull–bear spread; weekly six-month outlook survey. ±10 pp defines the app’s tilt; extremes can be contrarian.")
+    return aaii.summary(when, bull, neutral, bear)
 
 
 def parse_cnn(text, today):
@@ -198,16 +201,131 @@ def cached_read(key, fetch, now, ttl_hours=6):
     except Exception:
         return {**(saved or {}), "status": "cached" if saved else "unavailable",
                 "checked_at": now.isoformat(), "error": "Provider blocked, unavailable, or returned an unrecognized response."}
+    write_json(path, result)
+    return result
+
+
+def write_json(path, data):
+    """Atomic replace, so an interrupted refresh never leaves a truncated file behind."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
             temporary = handle.name
-            json.dump(result, handle, allow_nan=False)
+            json.dump(data, handle, allow_nan=False)
         os.replace(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def download_bars(symbols, *, actions=False, period=REPLICA_HISTORY, chunk=150):
+    frames = []
+    for start in range(0, len(symbols), chunk):
+        frame = yf.download(list(symbols[start:start + chunk]), period=period, interval="1d", auto_adjust=False,
+                            actions=actions, group_by="column", progress=False, threads=True, timeout=20)
+        if frame is not None and not frame.empty:
+            frames.append(frame)
+    if not frames:
+        raise ValueError("No price history")
+    return pd.concat(frames, axis=1, sort=True)
+
+
+def nyse_symbols():
+    data = json.loads((config.DATA_DIR / "universe.json").read_text(encoding="utf-8"))
+    return sorted({s["yahoo"] for s in data["stocks"] if s.get("exchange") == "NYSE" and s.get("yahoo")})
+
+
+def put_call_history(client, sessions, deadline, workers=4):
+    """Stored Cboe volumes by session, filling missing sessions newest first until the deadline.
+
+    Old sessions take Cboe several seconds to render, so a few run concurrently; the shared limiter
+    still caps the request rate at the scan's Cboe politeness limit.
+    """
+    path = config.DATA_DIR / "sentiment" / "put_call_history.json"
+    try:
+        history = json.loads(path.read_text(encoding="utf-8"))["sessions"]
+    except (OSError, ValueError, TypeError, KeyError):
+        history = {}
+    limiter = net.RateLimiter(config.CBOE_MAX_PER_MINUTE, 60.0, 60.0 / config.CBOE_MAX_PER_MINUTE)
+    lock = threading.Lock()
+    failures = []
+
+    def fetch(day):
+        if time.monotonic() > deadline or len(failures) >= 5:
+            return day, None
+        with lock:
+            limiter.wait()
+        try:
+            when, volumes = fear_greed.parse_put_call_volumes(request_text(client, PC_URL, params={"dt": day}))
+        except Exception:
+            when = volumes = None
+        if when != day:  # blocked, unparseable, or another session; never relabel it
+            failures.append(day)
+            return day, None
+        failures.clear()
+        return day, volumes
+
+    added = 0
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for day, volumes in pool.map(fetch, [d.isoformat() for d in reversed(sessions) if d.isoformat() not in history]):
+            if volumes:
+                history[day], added = volumes, added + 1
+                if added % 25 == 0:
+                    write_json(path, {"sessions": history})
+    if added:
+        write_json(path, {"sessions": history})
+    return history
+
+
+def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=fear_greed.PUT_CALL_SESSIONS,
+                      backfill_seconds=PUT_CALL_BACKFILL_SECONDS):
+    local = now.astimezone(context.MARKET_TZ)
+    bars = fear_greed.completed(download_bars(fear_greed.INDEX_SYMBOLS, actions=True, period=period), local.date(), local.hour)
+    sessions = [d.date() for d in bars["Close"]["^GSPC"].dropna().index][-put_call_sessions:]
+    inputs = fear_greed.index_inputs(bars["Close"], bars["Dividends"])
+    notes = {}
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        # Cboe and Yahoo are separate hosts, so the history backfill overlaps the stock download.
+        stored = pool.submit(put_call_history, client, sessions, time.monotonic() + backfill_seconds)
+        try:
+            stocks = fear_greed.completed(download_bars(nyse_symbols(), period=period), local.date(), local.hour)
+            nyse, count = fear_greed.nyse_inputs(stocks["Close"], stocks["High"], stocks["Low"], stocks["Volume"])
+            inputs.update(nyse)
+            notes["strength"] = notes["breadth"] = f"{count} NYSE stocks with a year of daily bars (screen universe, ≥ $1B)."
+        except (OSError, ValueError, KeyError, TypeError):
+            notes["strength"] = notes["breadth"] = "NYSE stock history unavailable; run a scan to build the stock list."
+        history = stored.result()
+    inputs["put_call"] = fear_greed.put_call_input(history, sessions)
+    held = sum(d.isoformat() in history for d in sessions)
+    notes["put_call"] = (f"Building Cboe history: {held}/{len(sessions)} sessions stored; fills over the next refreshes."
+                         if held < len(sessions) - 20 else f"{held} Cboe sessions stored.")
+    return inputs, notes
+
+
+def fetch_fear_greed(client, now):
+    progress.emit(activity="Building the Fear & Greed replica from public data")
+    return fear_greed.replica(*fear_greed_inputs(client, now))
+
+
+def check_fear_greed(now=None, years=3):
+    """Compare the replica with CNN's published history; needs CNN's feed and a filled Cboe history."""
+    now = now or datetime.now(timezone.utc)
+    start = (now - timedelta(days=365 * years)).date().isoformat()
+    period = f"{years + 4}y"
+    with httpx.Client(headers={"User-Agent": config.USER_AGENT}, timeout=30, follow_redirects=True) as client:
+        cnn = json.loads(request_text(client, f"{CNN_URL}/{start}"))
+        inputs, _ = fear_greed_inputs(client, now, period=period, backfill_seconds=0,
+                                      put_call_sessions=252 * (years + 3))
+    replica_scores = fear_greed.history(inputs)
+    result = fear_greed.compare(fear_greed.cnn_series(cnn), replica_scores["score"])
+    for key, (name, _) in fear_greed.COMPONENTS.items():
+        print(f"{name:22s} {len(replica_scores[key].dropna()) if key in replica_scores else 0:5d} scored sessions")
+    # The put/call component limits the window: its scores start 629 stored Cboe sessions in.
+    print(f"Replica vs CNN on sessions with all seven components, {result['start']} → {result['end']} ({result['sessions']} sessions): "
+          f"correlation {result['correlation']:.3f}, mean gap {result['mean_abs_gap']:.1f} points "
+          f"(90% within {result['p90_abs_gap']:.1f}, max {result['max_abs_gap']:.1f}, bias {result['bias']:+.1f}), "
+          f"same rating on {result['same_rating']:.0%} of sessions.")
     return result
 
 
@@ -254,6 +372,7 @@ def collect(rows, *, now=None):
                     raise ValueError("Future observation")
                 return item
             jobs[("macro", key)] = macro_fetch
+        jobs[("macro", "fear_greed")] = lambda: fetch_fear_greed(client, now)
         symbols = {SECTORS.get(str(row.get("sector") or "").lower()) for row in rows} - {None}
         for symbol in sorted(symbols | {"SPY"}):
             jobs[("benchmarks", symbol)] = lambda symbol=symbol: fetch_benchmark(symbol)
@@ -281,7 +400,40 @@ def collect(rows, *, now=None):
             for i, (kind, key, value) in enumerate(pool.map(run, jobs.items()), 1):
                 result[kind][key] = value
                 progress.emit(activity=f"Sentiment sources checked: {i}/{len(jobs)}")
+    result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
     return result
+
+
+def with_aaii_import(live, today, folders=None):
+    """AAII's page when it answers; otherwise, or when newer, the spreadsheet the user saved. Read every refresh."""
+    store = config.DATA_DIR / "sentiment" / "aaii-import.json"
+    try:
+        saved = json.loads(store.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = None
+    found, notes = aaii.imported(today, saved, folders)
+    if found and found is not saved:
+        write_json(store, found)
+    item = live
+    if found and not (live.get("status") in ("ok", "cached") and str(live.get("as_of", "")) > found["as_of"]):
+        item = found
+    return {**item, "import_url": aaii.DOWNLOAD_URL, **({"import_note": " ".join(notes)} if notes else {})}
+
+
+def usable(item, today, max_age):
+    return (item.get("status") in ("ok", "cached") and isinstance(item.get("value"), (int, float))
+            and not isinstance(item.get("value"), bool) and fresh(item.get("as_of"), today, max_age))
+
+
+def with_replica(cnn, replica, today):
+    """CNN stays primary; the replica is a labelled cross-check, or stands in when CNN has no fresh reading."""
+    if not usable(replica, today, REPLICA_MAX_AGE):
+        return cnn
+    if usable(cnn, today, cnn["max_age"]):
+        keys = ("value", "reading", "signal", "as_of", "coverage", "components", "fetched_at", "status", "method")
+        return {**cnn, "replica": {k: replica.get(k) for k in keys}}
+    return {**replica, "key": "cnn", "name": "Fear & Greed replica", "url": CNN_PAGE, "max_age": REPLICA_MAX_AGE,
+            "replica_of": "CNN Fear & Greed", "cnn_status": cnn.get("status"), "cnn_as_of": cnn.get("as_of")}
 
 
 def unavailable(key, reason):
@@ -348,6 +500,8 @@ def evaluate(payload, inputs, *, now=None):
                 "name": name, "url": url, "max_age": max_age}
         if item.get("as_of") and not fresh(item["as_of"], today, max_age):
             item["status"] = "stale"
+        if key == "cnn":
+            item = with_replica(item, inputs.get("macro", {}).get("fear_greed") or {}, today)
         cards.append(item)
     payload["macro_sentiment"] = {"cards": cards, "checked_at": inputs.get("collected_at")}
     benchmarks = {key: momentum(item, now) for key, item in inputs.get("benchmarks", {}).items()}

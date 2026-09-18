@@ -262,6 +262,39 @@ test('sentiment sorts both directions with stale and unknown rows always last', 
   sort(); assert.deepEqual(symbols(app), ['MID1','MID0','MID2','MID3']);
 });
 
+test('fear and greed replica is labelled as a stand-in or as a cross-check, never as CNN', () => {
+  const parts = [{key:'momentum', name:'Market momentum', score:25.4, rating:'Fear', reading:'S&P 500 +3.4% vs 125-day average'},
+    {key:'put_call', name:'Put and call options', score:null, detail:'Building Cboe history: 120/629 sessions stored'}];
+  const replica = {value:31.2, reading:'31.2/100', signal:'Fear', status:'ok', as_of:'2026-09-17', coverage:6, components:parts};
+  const standIn = renderEarnings(null, {}, {macro:{cards:[{key:'cnn', name:'Fear & Greed replica', ...replica, max_age:4, direction:-1,
+    replica_of:'CNN Fear & Greed', cnn_status:'unavailable', method:'Replica method', detail:'Replica detail'}]}});
+  const card = standIn.element('macro-cards').innerHTML;
+  assert.match(card, /Fear &amp; Greed replica/);
+  assert.match(card, /Not CNN's reading · CNN feed unavailable/);
+  assert.match(card, /Market momentum · 25.4 Fear/);
+  assert.match(card, /Put and call options · Unavailable<span>Building Cboe history/);
+  const crossCheck = renderEarnings(null, {}, {macro:{cards:[{key:'cnn', name:'CNN Fear & Greed', value:28.6, reading:'28.6/100',
+    signal:'Fear', status:'ok', as_of:'2026-09-18', max_age:2, direction:-1, replica}]}});
+  assert.match(crossCheck.element('macro-cards').innerHTML, /Replica 31.2 · \+2.6 vs CNN/);
+  assert.match(crossCheck.element('macro-cards').innerHTML, /Replica cross-check · 6\/7 components/);
+  assert.doesNotMatch(crossCheck.element('macro-cards').innerHTML, /Not CNN's reading/);
+});
+
+test('aaii card names the imported spreadsheet and always links the weekly download', () => {
+  const url = 'https://www.aaii.com/files/surveys/sentiment.xls';
+  const imported = renderEarnings(null, {}, {macro:{cards:[{key:'aaii', value:-24.5, reading:'-24.5 pp', status:'ok', as_of:'2026-09-17',
+    max_age:10, signal:'Bearish tilt', direction:-1, date_label:'reported', source_file:'sentiment (1).xls',
+    file_saved:'2026-09-18T12:00:00+00:00', import_url:url}]}}).element('macro-cards').innerHTML;
+  assert.match(imported, /As of 2026-09-17 · reported/);
+  assert.match(imported, /From AAII's spreadsheet · sentiment \(1\).xls/);
+  assert.match(imported, /href="https:\/\/www.aaii.com\/files\/surveys\/sentiment.xls"[^>]*>download the AAII spreadsheet</);
+  assert.match(imported, /Current file saved 2026-09-18/);
+  const missing = renderEarnings(null, {}, {macro:{cards:[{key:'aaii', status:'unavailable', import_url:url,
+    import_note:'The app cannot read Downloads.'}]}}).element('macro-cards').innerHTML;
+  assert.match(missing, /download the AAII spreadsheet/);
+  assert.match(missing, /The app cannot read Downloads./);
+});
+
 test('macro excludes stale data and retains source observation dates', () => {
   const app = renderEarnings(null, {}, {macro:{cards:[
     {key:'vix', value:15, reading:'15.00', status:'ok', as_of:'2026-09-17', max_age:4, signal:'Calm', direction:1},

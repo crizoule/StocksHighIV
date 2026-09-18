@@ -614,6 +614,9 @@ th.col-stock { z-index: 2; }
 .sentiment-evidence { max-height: 220px; overflow: auto; padding-left: 18px; font-size: 12px; line-height: 1.6; }
 .sentiment-evidence li { margin: 8px 0; }
 .sentiment-evidence span { display: block; color: var(--ink-3); }
+.replica-parts { padding-left: 16px; margin: 6px 0; }
+.replica-parts li { margin: 6px 0; }
+.replica-parts span { display: block; color: var(--ink-3); }
 @media (max-width: 960px) { .macro-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 540px) {
   .macro { padding: 16px; }

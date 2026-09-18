@@ -13,9 +13,10 @@ def main(argv: list[str] | None = None) -> None:
         ("run", "scan, then build."),
         ("explain", "Re-read the latest snapshot, fetch news, and rewrite the Why this IV column."),
         ("sentiment", "Refresh macro and stock sentiment on the saved dashboard without an IV scan."),
+        ("fear-greed-check", "Compare the Fear & Greed replica with CNN's published history (needs CNN's feed)."),
     ):
         cmd = sub.add_parser(name, help=help_text)
-        if name not in ("build", "explain", "sentiment"):
+        if name not in ("build", "explain", "sentiment", "fear-greed-check"):
             cmd.add_argument("--refresh-universe", action="store_true", help="Rebuild today's stock list.")
             cmd.add_argument("--refresh-quotes", action="store_true", help="Fetch all quotes again, including today's completed symbols.")
     args = parser.parse_args(argv)
@@ -32,6 +33,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "sentiment":
         from .report import sentiment_latest
         sentiment_latest()
+    if args.command == "fear-greed-check":
+        from .sentiment import check_fear_greed
+        check_fear_greed()
 
 
 if __name__ == "__main__":

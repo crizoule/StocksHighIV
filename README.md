@@ -42,7 +42,35 @@ The command-line examples below use Mac/Linux paths; on Windows replace `.venv/b
 
 ## Sentiment
 
-The macro panel shows dated VIX closes, Cboe equity/total/index put-call volume ratios, the AAII weekly bull–bear spread, and CNN Fear & Greed when its public website feed is accessible. Readings retain observation and retrieval dates. Sources are cached for six hours; failed requests retain the last good observation, explicitly marked as cached or stale. Stale inputs are excluded (4 calendar days for daily Cboe data, 10 for AAII, 2 for CNN). AAII and CNN can block automated requests; the app does not bypass those restrictions or fill in estimates. The panel needs at least three fresh readings to describe an overall tilt and explains overlapping CNN inputs.
+The macro panel shows dated VIX closes, Cboe equity/total/index put-call volume ratios, the AAII weekly bull–bear spread, and CNN Fear & Greed when its public website feed is accessible. Readings retain observation and retrieval dates. Sources are cached for six hours; failed requests retain the last good observation, explicitly marked as cached or stale. Stale inputs are excluded (4 calendar days for daily Cboe data, 10 for AAII, 2 for CNN). AAII and CNN can block automated requests; the app does not bypass those restrictions. For AAII, you can import the spreadsheet yourself (below). For CNN, a separately labelled replica (below) stands in when CNN has no fresh reading.
+
+**AAII spreadsheet import.** AAII publishes its survey on Thursdays. Once a week, download [AAII's spreadsheet](https://www.aaii.com/files/surveys/sentiment.xls) in your browser; the AAII card links to it too. Save it to your Downloads folder, or to `data/imports`. Each refresh reads the newest file named like AAII's download (`sentiment.xls`, `sentiment (1).xls`, `.xlsx` or `.csv`) from those two folders. It uses the latest reported week, unless AAII's page answers with a newer one. The card shows which file was used. The last imported reading is kept in `data/sentiment/aaii-import.json`, so deleting the download is fine. Like any AAII reading, it is excluded once it is more than 10 days old. On macOS, the first read of Downloads may ask for permission. If it is denied, the card says so; use `data/imports` instead. The panel needs at least three fresh readings to describe an overall tilt and explains overlapping CNN inputs.
+
+**Fear & Greed replica.** When CNN's feed is available, the CNN card shows the replica as a cross-check. When the feed is blocked or stale, the card shows the replica instead, labelled as not CNN's reading. The replica applies CNN's scoring rule, recovered from CNN's published history, to public stand-ins for CNN's seven inputs. Each input is z-scored against its trailing 125 sessions, then ranked against its trailing 500 z-scores. Volatility stays at 50 unless it ranks in extreme fear. The score is the average of the available components; it needs at least five.
+
+| Component | Replica input | Source |
+|---|---|---|
+| Market momentum | S&P 500 vs its 125-day average | Yahoo `^GSPC` |
+| Stock price strength | Net new 52-week highs as % of stocks, 20-session average | Yahoo daily bars for the screen's NYSE stocks (≥ $1B) |
+| Stock price breadth | McClellan volume summation index | Same NYSE stocks |
+| Put and call options | 5-session average put/call ratio | Cboe daily market statistics |
+| Market volatility | VIX vs its 50-day average | Yahoo `^VIX` |
+| Junk bond demand | HYG minus LQD trailing 12-distribution yield, lagged one session | Yahoo prices and distributions |
+| Safe haven demand | S&P 500 minus IEF return over 20 sessions | Yahoo `^GSPC`, `IEF` |
+
+Checked against CNN's published history on September 18, 2026:
+
+- **Scoring rule:** fed CNN's own published inputs, the recovered rule reproduces CNN's index to within 0.2 points on average, with the same rating on 99.9% of 809 sessions.
+- **Full replica:** from public data with all seven components, 272 sessions from August 2025 to September 2026. Correlation 0.97, average gap 3.0 points, 90% of sessions within 6.5 points, largest gap 15.9. The rating matched on 81% of sessions.
+- **Six-component version:** without the put/call component, over a longer window of 865 sessions since April 2023. Correlation 0.97, average gap 3.4 points.
+
+The widest component gaps come from put/call, where CNN's series matches no public Cboe ratio exactly, and junk bond demand, where CNN's feed carries one-day spikes around bond ETF payout dates that the replica does not copy.
+
+Each replica refresh downloads about four years of daily bars for roughly 1,400 NYSE stocks, which takes about a minute. The first few refreshes also backfill about 650 sessions of Cboe put/call history, stored in `data/sentiment/put_call_history.json`. The backfill runs up to four requests at once, stays within the scan's Cboe rate limit, and stops after three minutes per refresh. Until the history is complete, the replica runs on six components and says so. To re-check agreement with CNN's published history (needs CNN's feed and a complete Cboe history):
+
+```sh
+python -m highiv fear-greed-check
+```
 
 The sortable **Sentiment · Stock / sector** column shows a 0–100 heuristic and data coverage. Expand a stock to review each component, formula, observation date and source:
 

@@ -180,7 +180,7 @@ class App:
             marker = self.root / '.venv/.highiv-requirements'
             valid = marker.exists() and marker.read_text(encoding="utf-8") == fingerprint
             if valid:
-                result = subprocess.run([str(self.python), '-c', 'import httpx,yfinance,pandas,openpyxl,tzdata,PIL'],
+                result = subprocess.run([str(self.python), '-c', 'import httpx,yfinance,pandas,openpyxl,xlrd,tzdata,PIL'],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 valid = result.returncode == 0
             if not valid:

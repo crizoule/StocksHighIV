@@ -2,5 +2,6 @@ httpx>=0.28
 yfinance>=1.7
 pandas>=2.2
 openpyxl>=3.1
+xlrd>=2.0.1
 tzdata>=2024.1
 Pillow>=11.0

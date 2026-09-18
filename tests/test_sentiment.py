@@ -74,6 +74,61 @@ class MacroTests(unittest.TestCase):
         self.assertEqual([c["status"] for c in cards], ["stale", "unavailable", "ok", "unavailable"])
         self.assertEqual(cards[0]["as_of"], "2026-09-01")
 
+    def test_replica_is_a_cross_check_and_stands_in_only_without_a_fresh_cnn_reading(self):
+        replica = {"status": "ok", "value": 31.2, "reading": "31.2/100", "signal": "Fear", "direction": -1,
+                   "as_of": "2026-09-17", "coverage": 7, "components": [], "detail": "Replica", "method": "Method"}
+        cnn = {"status": "ok", "value": 28.6, "reading": "28.6/100", "signal": "Fear", "direction": -1, "as_of": "2026-09-18"}
+        card = lambda sources: evaluate(sources={"macro": sources})["macro_sentiment"]["cards"][3]
+        both = card({"cnn": cnn, "fear_greed": replica})
+        self.assertEqual((both["name"], both["value"], both["replica"]["value"]), ("CNN Fear & Greed", 28.6, 31.2))
+        self.assertNotIn("replica_of", both)
+        for missing in ({}, {"cnn": {**cnn, "as_of": "2026-09-01", "status": "cached"}}):
+            stand_in = card({**missing, "fear_greed": replica})
+            self.assertEqual((stand_in["name"], stand_in["value"], stand_in["replica_of"]),
+                             ("Fear & Greed replica", 31.2, "CNN Fear & Greed"))
+        self.assertEqual(card({"cnn": {**cnn, "as_of": "2026-09-01"}, "fear_greed": replica})["cnn_status"], "stale")
+        stale_replica = card({"fear_greed": {**replica, "as_of": "2026-09-01"}})
+        self.assertEqual((stale_replica["name"], stale_replica["status"]), ("CNN Fear & Greed", "unavailable"))
+
+    def test_saved_aaii_spreadsheet_stands_in_for_a_blocked_page_unless_the_page_is_newer(self):
+        imported = {"status": "ok", "value": -35.0, "reading": "-35.0 pp", "signal": "Bearish tilt", "direction": -1,
+                    "as_of": "2026-09-17", "date_label": "reported", "source_file": "sentiment.xls",
+                    "file_saved": "2026-09-18T12:00:00+00:00", "signature": ["sentiment.xls", 1, 1]}
+        blocked = {"status": "unavailable", "error": "Provider blocked"}
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+            with patch.object(s.aaii, "imported", return_value=(imported, [])):
+                item = s.with_aaii_import(blocked, TODAY)
+                self.assertEqual((item["value"], item["source_file"], item["import_url"]), (-35.0, "sentiment.xls", s.aaii.DOWNLOAD_URL))
+                newer = {"status": "ok", "value": 5.0, "as_of": "2026-09-23"}
+                self.assertEqual(s.with_aaii_import(newer, date(2026, 9, 24))["value"], 5.0)
+            stored = json.loads((Path(temp) / "sentiment" / "aaii-import.json").read_text(encoding="utf-8"))
+            self.assertEqual(stored["as_of"], "2026-09-17")  # kept for later refreshes, even if the file goes away
+            with patch.object(s.aaii, "imported", return_value=(None, ["The app cannot read Downloads."])):
+                item = s.with_aaii_import(blocked, TODAY)
+            self.assertEqual((item["status"], item["import_note"]), ("unavailable", "The app cannot read Downloads."))
+        card = evaluate(sources={"macro": {"aaii": {**imported, "as_of": "2026-09-03"}}})["macro_sentiment"]["cards"][2]
+        self.assertEqual(card["status"], "stale")  # a spreadsheet more than 10 days old is excluded like any AAII reading
+
+    def test_put_call_history_fills_newest_first_and_never_relabels_a_session(self):
+        days = [date(2026, 9, d) for d in (14, 15, 16, 17)]
+        page = lambda day: '{\\"selectedDate\\":\\"%s\\",\\"EQUITY OPTIONS\\":[{\\"name\\":\\"VOLUME\\",\\"call\\":2,\\"put\\":1}],' \
+                           '\\"EXCHANGE TRADED PRODUCTS\\":[{\\"name\\":\\"VOLUME\\",\\"call\\":2,\\"put\\":1}]}' % day
+        asked = []
+        def fake(client, url, params):
+            asked.append(params["dt"])
+            return page("2026-09-14" if params["dt"] == "2026-09-15" else params["dt"])
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)), \
+                patch.object(s, "request_text", fake), patch.object(s.config, "CBOE_MAX_PER_MINUTE", 10**6):
+            history = s.put_call_history(None, days, s.time.monotonic() + 60, workers=1)
+            self.assertEqual(asked, ["2026-09-17", "2026-09-16", "2026-09-15", "2026-09-14"])
+            self.assertEqual(sorted(history), ["2026-09-14", "2026-09-16", "2026-09-17"])
+            asked.clear()
+            s.put_call_history(None, days, s.time.monotonic() + 60, workers=1)
+            self.assertEqual(asked, ["2026-09-15"])  # stored sessions are never fetched again
+            asked.clear()
+            s.put_call_history(None, days, s.time.monotonic() - 1, workers=1)
+            self.assertEqual(asked, [])  # an exhausted budget sends nothing
+
     def test_cache_failure_never_replaces_fetch_time_with_now(self):
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
             saved = s.cached_read("vix", lambda: {"as_of": "2026-09-17", "value": 15}, NOW)
