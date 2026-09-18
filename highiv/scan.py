@@ -22,7 +22,7 @@ def load_universe(client, run_date: str, refresh: bool = False) -> list[dict]:
     """Build the universe once per day and cache it, so a resumed scan works on the same list."""
     path = config.DATA_DIR / "universe.json"
     if path.exists() and not refresh:
-        cached = json.loads(path.read_text())
+        cached = json.loads(path.read_text(encoding="utf-8"))
         if cached.get("run_date") == run_date:
             stocks = watchlist.include(cached["stocks"], watchlist.load())
             path.write_text(json.dumps({"run_date": run_date, "stocks": stocks}))

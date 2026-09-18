@@ -17,7 +17,7 @@ def normalize(symbol):
 def load(root=None):
     path = root/'data/watchlist.json' if root is not None else config.DATA_DIR/'watchlist.json'
     try:
-        data = json.loads(path.read_text())
+        data = json.loads(path.read_text(encoding="utf-8"))
         return list(dict.fromkeys(normalize(s) for s in data))
     except (OSError, ValueError, TypeError):
         return []

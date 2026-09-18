@@ -53,7 +53,7 @@ def _load_universe() -> dict[str, dict]:
     path = config.DATA_DIR / "universe.json"
     if not path.exists():
         raise SystemExit("No universe found. Run `python -m highiv scan` first.")
-    return {s["symbol"]: s for s in json.loads(path.read_text())["stocks"]}
+    return {s["symbol"]: s for s in json.loads(path.read_text(encoding="utf-8"))["stocks"]}
 
 
 def _bootstrap_history(conn, client, limiter, symbol: str, scan: dict) -> None:
@@ -247,11 +247,11 @@ def _distribution(values: list[float], width: int = 10, cap: int = 200) -> list[
 
 
 def render(payload: dict) -> str:
-    template = (config.TEMPLATE_DIR / "dashboard.html").read_text()
+    template = (config.TEMPLATE_DIR / "dashboard.html").read_text(encoding="utf-8")
     data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).replace("</", "<\\/")
     return (
-        template.replace("/*__CSS__*/", (config.TEMPLATE_DIR / "dashboard.css").read_text())
-        .replace("/*__JS__*/", (config.TEMPLATE_DIR / "dashboard.js").read_text())
+        template.replace("/*__CSS__*/", (config.TEMPLATE_DIR / "dashboard.css").read_text(encoding="utf-8"))
+        .replace("/*__JS__*/", (config.TEMPLATE_DIR / "dashboard.js").read_text(encoding="utf-8"))
         .replace("__DATA_JSON__", data)
         .replace("__FAVICON_BASE64__", base64.b64encode((config.TEMPLATE_DIR / "favicon.svg").read_bytes()).decode("ascii"))
     )
@@ -422,7 +422,7 @@ def explain_latest() -> Path:
     snaps = sorted(config.SNAPSHOT_DIR.glob("*.json"))
     if not snaps:
         raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
-    payload = json.loads(snaps[-1].read_text())
+    payload = json.loads(snaps[-1].read_text(encoding="utf-8"))
     rows = payload["rows"]
     log(f"Explaining IV for {len(rows)} leaders from the {payload['run_date']} snapshot")
     for i, row in enumerate(rows, 1):

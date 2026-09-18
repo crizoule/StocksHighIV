@@ -35,7 +35,7 @@ class App:
         self.stop_scheduler = threading.Event()
         self.settings = {'mode': 'manual', 'time': '16:30', 'last_scheduled_date': None}
         try:
-            saved_settings = json.loads((self.data_root/'data/launcher-settings.json').read_text())
+            saved_settings = json.loads((self.data_root/'data/launcher-settings.json').read_text(encoding="utf-8"))
             self.validate_settings(saved_settings)
             self.settings.update(saved_settings)
         except (OSError, ValueError, TypeError):
@@ -178,7 +178,7 @@ class App:
             # Verify both requirements fingerprint and imports; repair incomplete installations on retry.
             fingerprint = hashlib.sha256((self.root/'requirements.txt').read_bytes()).hexdigest()
             marker = self.root / '.venv/.highiv-requirements'
-            valid = marker.exists() and marker.read_text() == fingerprint
+            valid = marker.exists() and marker.read_text(encoding="utf-8") == fingerprint
             if valid:
                 result = subprocess.run([str(self.python), '-c', 'import httpx,yfinance,pandas,openpyxl,tzdata,PIL'],
                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -296,9 +296,9 @@ def handler(app):
                                 except OSError:
                                     pass
                         saved_json = json.dumps(saved_payload, ensure_ascii=False).replace('</', '<\\/')
-                        template = (app.root/'templates/dashboard.html').read_text()
-                        template = template.replace('/*__CSS__*/', (app.root/'templates/dashboard.css').read_text())
-                        template = template.replace('/*__JS__*/', (app.root/'templates/dashboard.js').read_text())
+                        template = (app.root/'templates/dashboard.html').read_text(encoding="utf-8")
+                        template = template.replace('/*__CSS__*/', (app.root/'templates/dashboard.css').read_text(encoding="utf-8"))
+                        template = template.replace('/*__JS__*/', (app.root/'templates/dashboard.js').read_text(encoding="utf-8"))
                         template = template.replace('__DATA_JSON__', saved_json)
                         template = template.replace('__FAVICON_BASE64__', base64.b64encode((app.root/'templates/favicon.svg').read_bytes()).decode())
                         body = ('<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body>' + template + '</body></html>').encode('utf-8')

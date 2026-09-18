@@ -97,7 +97,7 @@ class Launcher:
             command = python_command()
             self.log = (ROOT/'launcher.log').open('ab')
             self.process = subprocess.Popen([*command, str(self.workspace/'launch.py')], cwd=self.workspace,
-                env={**os.environ, 'HIGHIV_DATA_ROOT': str(ROOT), 'PYTHONUNBUFFERED': '1'},
+                env={**os.environ, 'HIGHIV_DATA_ROOT': str(ROOT), 'PYTHONUNBUFFERED': '1', 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'},
                 stdout=self.log, stderr=self.log, creationflags=NO_WINDOW)
             for _ in range(60):
                 if self.process.poll() is not None:

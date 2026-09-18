@@ -1,4 +1,5 @@
 """Publish a built Mac update atomically: keep the release draft until both assets exist."""
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -28,12 +29,20 @@ def main():
     if not feed_signature:
         raise SystemExit('Missing feed signature')
     subprocess.run([*verifier, str(feed), release['update_public_key'], feed_signature[1].decode(), feed_signature[2].decode()], check=True)
+    windows_archive = ROOT/'dist/windows/StocksHighIV-Windows.zip'
+    windows_feed = ROOT/'dist/windows/windows-update.json'
+    windows = json.loads(windows_feed.read_text())
+    if (windows['version'] != version or windows['build'] != int(release['build'])
+            or windows['sha256'] != hashlib.sha256(windows_archive.read_bytes()).hexdigest()
+            or windows['url'] != f'https://github.com/{REPO}/releases/download/v{version}/StocksHighIV-Windows.zip'):
+        raise SystemExit('Windows archive/feed mismatch: rebuild and sign both platforms before publishing.')
+    subprocess.run([*verifier, str(windows_archive), release['update_public_key'], windows['signature']], check=True)
     # Refuse accidentally publishing code that has not been committed and pushed.
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = 'Mac app with signed in-app updates and the StocksHighIV icon. Existing 1.0.x users must install this version once manually. Afterward, choose Check for Updates from the app menu or use the automatic update prompts. Updates wait for active market downloads and preserve local data. Python 3.11+ and macOS 12+ required.'
-    subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), '--repo', REPO,
+    notes = 'Mac and Windows launchers with signature-verified in-app updates. Download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Existing users need one manual installation to acquire the updater. Updates wait for active market downloads and preserve local data. Requires Python 3.11+. Windows package supports Windows 10/11 x64 and may show a SmartScreen warning on first launch because it is not Authenticode-signed. The Mac app is Apple-notarized.'
+    subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), str(windows_archive), str(windows_feed), '--repo', REPO,
                     '--target', commit, '--draft', '--title', f'StocksHighIV {version}', '--notes', notes], check=True)
     subprocess.run(['gh', 'release', 'edit', f'v{version}', '--repo', REPO, '--draft=false', '--latest'], check=True)
 

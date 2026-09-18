@@ -53,6 +53,8 @@ For every release:
 3. Publish **both** files as assets of the corresponding GitHub release (`v` plus the version). Draft the release, upload both assets, then publish it. Keep all releases' assets immutable; don't replace a ZIP without re-signing its feed.
 4. The feed URL is `https://github.com/crizoule/StocksHighIV/releases/latest/download/appcast.xml`. Therefore every new latest release must include the appcast. Pushing source changes alone does not publish an application update.
 
-Users on 1.0.x need one manual installation of 1.1.0 or later to acquire the updater. Windows/source launchers do not self-update. Preserve the update-signing Keychain key when moving build machines; losing it requires a deliberate key-rotation plan.
+Users on 1.0.x need one manual installation of 1.1.0 or later to acquire the updater. The packaged Windows launcher has its own signed updater starting with 1.2.0; source launchers do not self-update. Preserve the update-signing Keychain key when moving build machines; losing it requires a deliberate key-rotation plan.
 
 After committing and pushing, `python3 packaging/macos/publish.py` verifies both update signatures, uploads both assets to a draft release, and publishes it as latest. This avoids exposing a latest release before its update feed is available. The publisher refuses an uncommitted worktree or a mismatched archive/feed.
+
+From 1.2.0 onward, the publisher also requires the signed Windows ZIP and `windows-update.json`; see [Windows packaging](../windows/README.md). This ensures a new latest release keeps both update feeds available.
