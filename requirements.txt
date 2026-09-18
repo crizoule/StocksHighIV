@@ -1,0 +1,4 @@
+httpx>=0.28
+yfinance>=1.7
+pandas>=2.2
+openpyxl>=3.1

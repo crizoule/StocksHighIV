@@ -1,0 +1,142 @@
+<title>Implied Vol Leaders</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/*__CSS__*/
+</style>
+
+<div class="page">
+  <header class="masthead">
+    <div class="brand">
+      <p class="eyebrow">Daily options screen · US &amp; Canadian listings</p>
+      <h1>Implied Vol Leaders</h1>
+      <p class="lede" id="lede"></p>
+    </div>
+    <dl class="session" id="session"></dl>
+  </header>
+
+  <div class="cap-tabs" id="cap-tabs" role="tablist" aria-label="Market capitalization in US dollars">
+    <button type="button" role="tab" id="cap-mid" data-cap="mid" aria-selected="true" aria-controls="cap-panel">US$1B–$100B</button>
+    <button type="button" role="tab" id="cap-large" data-cap="large" aria-selected="false" aria-controls="cap-panel" tabindex="-1">US$100B+</button>
+  </div>
+
+  <div class="cap-panel" id="cap-panel" role="tabpanel" aria-labelledby="cap-mid">
+  <section class="overview" aria-label="Today at a glance">
+    <div class="figures panel" id="figures"></div>
+    <figure class="dist panel">
+      <figcaption>
+        <span class="fig-title">Where the leaders sit</span>
+        <span class="fig-note" id="dist-note"></span>
+      </figcaption>
+      <div class="dist-frame" id="dist-frame">
+        <svg id="dist-chart" role="img" aria-labelledby="dist-desc"><desc id="dist-desc"></desc></svg>
+      </div>
+    </figure>
+  </section>
+
+  <section class="board panel" aria-labelledby="board-title">
+    <div class="board-head">
+      <div>
+        <h2 id="board-title">Top <span id="top-n">100</span> by 30-day implied volatility</h2>
+        <p class="board-sub" id="board-sub"></p>
+      </div>
+      <div class="controls">
+        <div class="seg" id="market-seg" role="radiogroup" aria-label="Listed on">
+          <button type="button" role="radio" id="mkt-all" data-market="all" aria-checked="true">All</button>
+          <button type="button" role="radio" id="mkt-us" data-market="us" aria-checked="false">US-listed</button>
+          <button type="button" role="radio" id="mkt-tsx" data-market="tsx" aria-checked="false">TSX-listed</button>
+        </div>
+        <label class="switch" for="hq-only">
+          <input type="checkbox" id="hq-only">
+          <span class="switch-track" aria-hidden="true"></span>
+          <span>US/Canada HQ only</span>
+        </label>
+        <div class="frame-control">
+          <span class="ctl-label">Price chart</span>
+          <div class="seg frames" id="frame-seg" role="radiogroup" aria-label="Price chart timeframe">
+            <button type="button" role="radio" data-frame="1H" aria-checked="false" tabindex="-1">1H</button>
+            <button type="button" role="radio" data-frame="4H" aria-checked="false" tabindex="-1">4H</button>
+            <button type="button" role="radio" data-frame="1D" aria-checked="true">1D</button>
+            <button type="button" role="radio" data-frame="1W" aria-checked="false" tabindex="-1">1W</button>
+            <button type="button" role="radio" data-frame="1M" aria-checked="false" tabindex="-1">1M</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr>
+            <th class="col-stock" data-sort="rank" aria-sort="none" data-tip-wait="2000" data-tip="Rank by IV30, ticker, exchange, company and what it does. Canadian companies that also trade in the US carry their TSX symbol."><button type="button">Stock</button></th>
+            <th class="col-industry" data-sort="industry" aria-sort="none" data-tip-wait="2000" data-tip="Yahoo's industry classification, with the broader sector beneath it. Sort this column to group similar names together."><button type="button">Industry</button></th>
+            <th data-sort="iv30" aria-sort="descending" data-tip-wait="2000" data-tip="Implied volatility for the next 30 days, annualized: the move the options market is pricing in. The bar compares each stock with the leader in this view."><button type="button">IV30</button></th>
+            <th class="col-why" data-sort="iv_why_kind" aria-sort="none" data-tip-wait="2000" data-tip="Business cycle and theme exposures, observed stock/peer moves, and possible company events. These are separate kinds of evidence; none proves the cause of IV. Expand for sources, dates and peer composition. Sort by event evidence."><button type="button">Why this IV</button></th>
+            <th data-sort="iv_rank" aria-sort="none" data-tip-wait="2000" data-tip="Where today's IV30 sits between the window's low (0) and high (100)."><button type="button">IV rank</button></th>
+            <th data-sort="iv_percentile" aria-sort="none" data-tip-wait="2000" data-tip="Share of sessions in the window that closed below today's IV30. Rank reads the range; percentile reads how often IV was lower."><button type="button">IV %</button></th>
+            <th class="nosort col-trend" data-tip-wait="2000" data-tip="IV30 session by session over the window, with its low, high and average printed underneath. Hover the line for a date and value.">IV history</th>
+            <th class="r" data-sort="hv30" aria-sort="none" data-tip-wait="2000" data-tip="Historical (realized) volatility: annualized standard deviation of the last 30 daily closes. Below it, IV30 ÷ HV30 — above 1 means options price a bigger move than the stock has made."><button type="button">HV30</button></th>
+            <th class="nosort col-price" data-tip-wait="2000" data-tip="Closing prices on the timeframe chosen above the table, with the move across that whole window — not the last bar. Underneath: RSI(14) and today's volume against its 20-day average."><span id="price-head">Price · 1D bars · 6 mo</span></th>
+            <th data-sort="range_pos" aria-sort="none" data-tip-wait="2000" data-tip="Last price between its 52-week low and high, with the distance below the high."><button type="button">52-wk price range</button></th>
+            <th class="r" data-sort="float_shares" aria-sort="none" data-tip-wait="2000" data-tip="Shares actually available to trade, and what share of all shares outstanding that is. A small float moves further on the same buying."><button type="button">Float</button></th>
+            <th class="r" data-sort="short_pct_float" aria-sort="none" data-tip-wait="2000" data-tip="Shorted shares as a percentage of float, with the change since the prior report. Published twice a month."><button type="button">Short % float</button></th>
+            <th class="r" data-sort="days_to_cover" aria-sort="none" data-tip-wait="2000" data-tip="Days of average trading volume it would take shorts to buy back every shorted share."><button type="button">Days to cover</button></th>
+            <th class="r" data-sort="borrow_fee" aria-sort="none" data-tip-wait="2000" data-tip="Annual cost to borrow the stock for shorting, from Interactive Brokers' daily file, with shares available underneath. A high fee means the short is expensive to hold — the pressure that actually forces covering."><button type="button">Borrow fee</button></th>
+            <th data-sort="squeeze" aria-sort="none" data-tip-wait="2000" data-tip="Short interest and days to cover combined into one flag: high, elevated or low. A screening heuristic, not a forecast."><button type="button">Squeeze setup</button></th>
+            <th class="r" data-sort="market_cap_usd" aria-sort="none" data-tip-wait="2000" data-tip="Market capitalization in US dollars; Canadian listings are converted at the day's rate. Everything here clears US$1B."><button type="button">Mkt cap</button></th>
+            <th data-sort="earnings_in_days" aria-sort="none" data-tip-wait="2000" data-tip="Next earnings report: date, hour in market time, and whether it lands before the open or after the close. 'est.' means Yahoo estimated the date, so no hour is shown."><button type="button">Earnings</button></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="empty" id="empty" hidden>No stocks match these filters.</p>
+  </section>
+
+  </div>
+  <section class="notes" aria-labelledby="notes-title">
+    <h2 id="notes-title">How to read this screen</h2>
+    <div class="notes-grid">
+      <div>
+        <h3>Who makes the list</h3>
+        <p>Common stocks on NYSE, Nasdaq, NYSE American, TSX or TSXV with a market cap above <span data-setting="cap"></span> and listed options, excluding <span data-setting="excluded"></span>, with independent top-100 lists for US$1B to below US$100B and US$100B or more. Each tab is ranked by 30-day implied volatility (IV30): the annualized move the options market is pricing for the next month. Canadian companies that also trade in New York appear once, on their US line where options are deeper, tagged with their TSX symbol.</p>
+      </div>
+      <div>
+        <h3>IV rank and percentile</h3>
+        <p><strong>IV rank</strong> places today’s IV30 between its low (0) and high (100) over the look-back, while <strong>IV percentile</strong> is the share of past sessions that closed below it — a stock can sit at rank 90 yet in the 60th percentile if it spent months near the middle and spiked once. The look-back is 52 weeks once enough history exists; until then each cell names the window it used, such as “13w”. The IV history column prints that window’s low, high and average under the sparkline, and history starts with about three months from AlphaQuery, growing with every daily run.</p>
+      </div>
+      <div>
+        <h3>Why this IV</h3>
+        <p>Structural context identifies business exposures such as commodity and memory cycles, AI/compute spending, documented AI disruption risk, and crypto activity. It comes from company profiles or linked issuer disclosures and does not assert what caused this session’s IV. Observed moves use roughly three months of completed daily closes through the IV date. Peer comparisons exclude the stock itself, require at least three other screened companies with the same exposure and identical start/end dates, and span both cap tabs. A broad move is highlighted only when the peer median rises or falls at least 20% and at least two-thirds move in that direction. This selected high-IV sample is not the whole industry; shared gains or losses do not establish hype or a common cause.</p>
+        <p>A possible event headline must name the company, describe a concrete event, include a source link and publisher, and be dated within seven days on or before the IV session. Its article body and connection to IV have not been independently verified. Upcoming earnings show date certainty. Insufficient event evidence stays “No clear catalyst found” even when structural context is available; unavailable news is flagged separately. Expand a row for sources, observed dates and the peer list. IV measures expected magnitude, not the direction of the next move.</p>
+      </div>
+      <div>
+        <h3>HV30 and the IV ÷ HV ratio</h3>
+        <p><strong>HV30</strong> is historical (realized) volatility: the annualized standard deviation of the last 30 daily closes — what the stock actually did, rather than what options expect. The ratio beside it divides IV30 by HV30, so 2.0× means options price twice the movement the stock has been making, which usually points at an event ahead; below 1.0× the options are pricing less movement than the recent past.</p>
+      </div>
+      <div>
+        <h3>Squeeze setup</h3>
+        <p><span data-setting="squeeze"></span> <strong>Small float</strong> marks fewer than <span data-setting="small-float"></span> freely traded shares. Short interest is reported twice a month; the settlement date is in each row’s details. The <strong>borrow fee</strong> is what a short pays per year to hold the position, from Interactive Brokers’ daily lendable-stock file — a fee in the double digits means the position is expensive to keep, which is the pressure that forces covering, and a dash means no borrow was on offer at all. A setup is a screening flag, not a forecast.</p>
+      </div>
+      <div>
+        <h3>Price charts and earnings</h3>
+        <p>The price column plots closes on the timeframe picked above the table — hourly over the past week, 4-hour over the past month, daily over six months, weekly over two years, monthly over five — and a row’s details show all five at once, each with a MACD (12/26/9) pane beneath it. Under each chart, RSI(14) and today’s volume against its 20-day average flag what is moving now; both use completed sessions only, so a day still in progress never distorts them. Earnings times are market time (ET) and read “before open”, “during session” or “after close”. Yahoo pads an estimated date with a placeholder hour, so a row marked <strong>est.</strong> shows the date only.</p>
+      </div>
+      <div>
+        <h3>Sources and timing</h3>
+        <p>IV30 comes from Cboe delayed quotes for US listings and from Montréal Exchange option chains for TSX-only names (at-the-money IV interpolated to 30 days). Float, short interest, 52-week range, price history and earnings dates come from Yahoo Finance; stock lists from Nasdaq, OCC and TMX. Quotes are delayed about 15 minutes, so the daily run starts after the close.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p id="foot-meta"></p>
+    <p>Screening data for research, not investment advice. Free public sources can be late or wrong; confirm before trading.</p>
+  </footer>
+</div>
+
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<script id="payload" type="application/json">__DATA_JSON__</script>
+<script>
+/*__JS__*/
+</script>
