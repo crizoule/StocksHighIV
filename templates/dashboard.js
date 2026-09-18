@@ -72,6 +72,77 @@
     return weeks >= 51 ? "52w" : `${weeks}w`;
   };
 
+  /* ---------- sentiment: unavailable is not neutral ---------- */
+  const sentimentFresh = (iso, maxAge = 4) => {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return false;
+    const age = (Date.now() - day(iso.slice(0, 10)).getTime()) / 864e5;
+    return Number.isFinite(age) && age >= 0 && age < maxAge + 1;
+  };
+  const sentimentLink = (url, text) => /^https?:\/\//i.test(url || "")
+    ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>` : esc(text || "—");
+  const sentimentTone = score => !isNum(score) ? "unknown" : score > 60 ? "positive" : score < 40 ? "negative" : "mixed";
+  const sentimentLabel = score => !isNum(score) ? "Insufficient evidence" : score > 60 ? "Positive" : score < 40 ? "Negative" : "Mixed";
+  const sentimentView = r => {
+    const stored = r.sentiment || {};
+    const components = (stored.components || []).map(c => ({...c,
+      score: isNum(c.score) && sentimentFresh(c.as_of, c.max_age || 4) ? c.score : null,
+      stale: isNum(c.score) && !sentimentFresh(c.as_of, c.max_age || 4),
+    }));
+    const available = components.filter(c => isNum(c.score));
+    const stock = available.find(c => c.key === "stock"), sector = available.find(c => c.key === "sector");
+    const coverage = available.reduce((sum, c) => sum + c.weight, 0);
+    const score = stock && sector && stock.as_of === sector.as_of && coverage > 0
+      ? Math.round(available.reduce((sum, c) => sum + c.score * c.weight, 0) / coverage) : null;
+    return {...stored, score, label: sentimentLabel(score), components, coverage,
+      mode: available.some(c => ["news", "social"].includes(c.key)) ? "Price + opinion" : "Price only", sector};
+  };
+  const sentimentCell = r => {
+    const s = sentimentView(r);
+    return `<span class="sentiment-badge ${sentimentTone(s.score)}">${isNum(s.score) ? `${s.score}/100 · ${s.label}` : "Insufficient evidence"}</span>` +
+      `<span class="sub">${isNum(s.sector?.score) ? `Sector ${nf0.format(s.sector.score)}/100 · ${esc(s.benchmark || "")}` : "Sector unavailable"}</span>` +
+      `<span class="sub">${s.coverage ? `${esc(s.mode)} · ${s.coverage}% coverage` : "No fresh inputs"}</span>`;
+  };
+  const sentimentDetails = r => {
+    const s = sentimentView(r);
+    const names = {stock: "Stock momentum", sector: "Sector momentum", news: "News sentiment", social: "Social sentiment"};
+    return `<div class="detail-group detail-wide sentiment-details"><h4>Stock / sector sentiment · ${isNum(s.score) ? `${s.score}/100 · ${s.label}` : "Insufficient evidence"}</h4>` +
+      `<p class="detail-text">${esc(s.method || "Sentiment was not collected in this saved report. Refresh data to collect it.")}</p>` +
+      `<div class="sentiment-components">${s.components.map(c => `<article><h5>${esc(names[c.key] || c.key)} <span>${isNum(c.score) ? `${nf0.format(c.score)}/100` : c.stale ? "Stale · excluded" : "Unavailable"}</span></h5>` +
+        `<p>${esc(c.detail)}</p><p class="sentiment-meta">Base weight ${esc(c.weight)}%${isNum(c.score) && isNum(s.score) ? ` · effective ${nf0.format(c.weight / s.coverage * 100)}%` : ""}` +
+        `${c.as_of ? ` · As of ${esc(c.as_of)}` : ""}${c.start20 ? ` · 20-session start ${esc(c.start20)}` : ""}` +
+        `${c.fetched_at ? ` · ${esc(fetchedLabel(c.fetched_at))}` : ""}${c.status === "cached" ? " · Last good reading; refresh failed" : ""}` +
+        ` · ${sentimentLink(c.url, c.source || "Source unavailable")}</p>` +
+        ((c.evidence || []).length ? `<ul class="sentiment-evidence">${c.evidence.map(e => `<li>${sentimentLink(e.url, e.title)} <span>${esc(e.source)} · ${esc(e.as_of)} · tone ${esc(e.score)}</span></li>`).join("")}</ul>` : "") +
+        `</article>`).join("")}</div></div>`;
+  };
+  const renderMacro = () => {
+    const defaults = [
+      {key:"vix", name:"VIX", url:"https://www.cboe.com/tradable-products/vix/"},
+      {key:"put_call", name:"Put/call ratios", url:"https://www.cboe.com/us/options/market_statistics/daily/"},
+      {key:"aaii", name:"AAII sentiment", url:"https://www.aaii.com/sentimentsurvey"},
+      {key:"cnn", name:"CNN Fear & Greed", url:"https://www.cnn.com/markets/fear-and-greed"},
+    ];
+    const cards = defaults.map(d => ({...d, ...(DATA.macro_sentiment?.cards || []).find(c => c.key === d.key)}))
+      .map(c => ({...c, usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
+    const available = cards.filter(c => c.usable);
+    const positive = available.filter(c => c.direction > 0).length, negative = available.filter(c => c.direction < 0).length;
+    $("macro-summary").textContent = available.length < 3 ? "Limited coverage" : positive && negative ? "Mixed signals" : positive >= 2 ? "Risk appetite leaning positive" : negative >= 2 ? "Cautious mood" : "Mixed signals";
+    $("macro-note").textContent = `${available.length}/4 fresh readings · Each source keeps its own observation date. ${DATA.macro_sentiment?.checked_at ? `Sources checked ${fetchedLabel(DATA.macro_sentiment.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect sentiment."} This panel is independent of the IV scan session.`;
+    $("macro-cards").innerHTML = cards.map(c => {
+      const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
+      const tone = !c.usable ? "unknown" : c.direction > 0 ? "positive" : c.direction < 0 ? "negative" : "mixed";
+      return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.reading || "—")}</div>` +
+        `<span class="sentiment-badge ${tone}">${esc(stale ? "Stale · excluded" : c.usable ? c.signal : "Unavailable")}</span>` +
+        `<p class="sentiment-meta">${c.as_of ? `As of ${esc(c.as_of)}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? " · week ending" : ""}</p>` +
+        (c.ratios ? `<p class="sentiment-meta">Total ${isNum(c.ratios.total) ? nf2.format(c.ratios.total) : "—"} · Index ${isNum(c.ratios.index) ? nf2.format(c.ratios.index) : "—"}</p>` : "") +
+        `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No verified reading in this report. The source may block automated access; no substitute value is estimated.")}</p>` +
+        (c.observed_at ? `<p>Provider timestamp: ${esc(c.observed_at)}</p>` : "") +
+        (c.fetched_at ? `<p>${esc(fetchedLabel(c.fetched_at))}</p>` : "") +
+        (c.status === "cached" ? "<p>Last good observation retained; latest refresh failed.</p>" : "") +
+        `${sentimentLink(c.url, "Open provider")}</details></article>`;
+    }).join("");
+  };
+
   /* ---------- views ---------- */
   const onTsx = (r) => r.market === "CA" || Boolean(r.also_listed);
   const inView = (r) =>
@@ -89,7 +160,7 @@
   const sortRows = (rows) => {
     const { key, dir } = state.sort;
     const sign = dir === "asc" ? 1 : -1;
-    const value = (r) => (key === "squeeze" ? SQUEEZE_ORDER[r.squeeze] : key === "iv_why_kind" ? (WHY_ORDER[r.iv_why_kind] || 0) : r[key]);
+    const value = (r) => (key === "sentiment" ? sentimentView(r).score : key === "squeeze" ? SQUEEZE_ORDER[r.squeeze] : key === "iv_why_kind" ? (WHY_ORDER[r.iv_why_kind] || 0) : r[key]);
     return [...rows].sort((a, b) => {
       const va = value(a), vb = value(b);
       const missA = va === null || va === undefined, missB = vb === null || vb === undefined;
@@ -303,6 +374,7 @@
     return `<tr class="row" tabindex="0" aria-expanded="${open}" data-symbol="${esc(r.symbol)}">` +
       `<td class="col-stock"><div class="stock"><span class="rank">${r.rank}</span><div><div class="tick"><button type="button" data-watch="${esc(r.symbol)}" aria-label="${watched.has(r.symbol) ? "Remove from" : "Add to"} watchlist" aria-pressed="${watched.has(r.symbol)}">${watched.has(r.symbol) ? "★" : "☆"}</button>${logoHtml(r)}<span class="sym">${esc(r.symbol)}</span>${chips}</div><div class="nm">${esc(r.name)}</div>${r.business ? `<div class="biz">${esc(r.business)}</div>` : ""}</div></div></td>` +
       `<td class="col-industry">${industryCell(r)}</td>` +
+      `<td class="col-sentiment">${sentimentCell(r)}</td>` +
       `<td class="col-iv"><div class="ivline"><span class="big">${nf1.format(r.iv30)}<small>%</small></span>${change}</div><span class="bar"><i style="width:${Math.max(2, (r.iv30 / maxIv) * 100)}%"></i></span></td>` +
       `<td class="col-why">${whyCell(r)}</td>` +
       `<td class="col-ivr">${ivRank}</td>` +
@@ -401,7 +473,8 @@
       `<span class="sub context-evidence">${esc(p.detail)} Peers: ${esc(p.members.map(m => `${m.symbol} ${signed(m.return_pct)}`).join(", "))}.</span>`]);
     if (r.iv_price_context) observed.unshift(["This stock", esc(r.iv_price_context.label) +
       `<span class="sub context-evidence">${esc(r.iv_price_context.detail)}</span>`]);
-    return `<tr class="detail"><td colspan="17"><div class="detail-grid">` +
+    return `<tr class="detail"><td colspan="18"><div class="detail-grid">` +
+      sentimentDetails(r) +
       group("Company", [
         ["HQ", esc(r.country || "—")],
         ["Sector", esc(r.sector || "—")],
@@ -536,6 +609,7 @@
   const MARKET_LABEL = { all: "US and TSX listings", us: "US-listed only", tsx: "TSX-listed (incl. interlisted)" };
   const render = () => {
     U = (DATA.universe_by_cap && DATA.universe_by_cap[state.cap]) || DATA.universe;
+    renderMacro();
     renderStatic();
     $("cap-panel").setAttribute("aria-labelledby", `cap-${state.cap}`);
     document.querySelectorAll("#cap-tabs button").forEach((b) => {

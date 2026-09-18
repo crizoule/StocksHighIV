@@ -12,9 +12,10 @@ def main(argv: list[str] | None = None) -> None:
         ("build", "Rank the latest scan, add float/short data and write the dashboard."),
         ("run", "scan, then build."),
         ("explain", "Re-read the latest snapshot, fetch news, and rewrite the Why this IV column."),
+        ("sentiment", "Refresh macro and stock sentiment on the saved dashboard without an IV scan."),
     ):
         cmd = sub.add_parser(name, help=help_text)
-        if name not in ("build", "explain"):
+        if name not in ("build", "explain", "sentiment"):
             cmd.add_argument("--refresh-universe", action="store_true", help="Rebuild today's stock list.")
             cmd.add_argument("--refresh-quotes", action="store_true", help="Fetch all quotes again, including today's completed symbols.")
     args = parser.parse_args(argv)
@@ -28,6 +29,9 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "explain":
         from .report import explain_latest
         explain_latest()
+    if args.command == "sentiment":
+        from .report import sentiment_latest
+        sentiment_latest()
 
 
 if __name__ == "__main__":

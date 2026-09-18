@@ -13,7 +13,7 @@ from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress, watchlist, logos
+from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress, watchlist, logos, sentiment
 from .universe import norm_name
 
 log = partial(print, flush=True)
@@ -413,6 +413,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         "rows": rows,
     }
     conn.close()
+    sentiment.enrich(payload)
     progress.emit(phase="render", activity="Building both dashboard tabs")
     return write_outputs(payload)
 
@@ -436,4 +437,15 @@ def explain_latest() -> Path:
         if i % 10 == 0 or i == len(rows):
             log(f"  {i}/{len(rows)} news lookups")
     payload["generated_at"] = datetime.now(MARKET_TZ).isoformat(timespec="minutes")
+    return write_outputs(payload)
+
+
+def sentiment_latest() -> Path:
+    """Refresh sentiment on the saved screen without running the full IV scan."""
+    snaps = sorted(config.SNAPSHOT_DIR.glob("*.json"))
+    if not snaps:
+        raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
+    payload = json.loads(snaps[-1].read_text(encoding="utf-8"))
+    sentiment.enrich(payload)
+    # Keep market-data generation timestamps intact; sentiment carries its own timestamps.
     return write_outputs(payload)

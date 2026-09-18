@@ -40,6 +40,29 @@ If the Mac ZIP extraction drops execute permission, run `chmod +x "Start StocksH
 
 The command-line examples below use Mac/Linux paths; on Windows replace `.venv/bin/python` with `.venv\Scripts\python.exe`.
 
+## Sentiment
+
+The macro panel shows dated VIX closes, Cboe equity/total/index put-call volume ratios, the AAII weekly bull–bear spread, and CNN Fear & Greed when its public website feed is accessible. Readings retain observation and retrieval dates. Sources are cached for six hours; failed requests retain the last good observation, explicitly marked as cached or stale. Stale inputs are excluded (4 calendar days for daily Cboe data, 10 for AAII, 2 for CNN). AAII and CNN can block automated requests; the app does not bypass those restrictions or fill in estimates. The panel needs at least three fresh readings to describe an overall tilt and explains overlapping CNN inputs.
+
+The sortable **Sentiment · Stock / sector** column shows a 0–100 heuristic and data coverage. Expand a stock to review each component, formula, observation date and source:
+
+- Stock momentum (40% base weight): `clamp(50 + 2 × return_5_sessions + return_20_sessions, 0, 100)`, with returns in percent.
+- Sector momentum (30%): the same formula on percentage-point excess returns of the matching US sector ETF over SPY. Uses sector benchmarks, not a biased sample of high-IV peers. Canadian listings also use this explicitly labeled US proxy.
+- News (20%, optional): Alpha Vantage ticker sentiment, relevance weighted and mapped from −1…+1 to 0…100. Requires at least three distinct article URLs from two publishers in the past seven days, exact US ticker matches, and relevance ≥0.2. One latest-news feed request per refresh limits cost and coverage; it is not an exhaustive news search.
+- Social (10%, optional): Stocktwits normalized 24-hour community sentiment, alongside message activity. US listings only; retrieval time is shown because the endpoint does not supply an observation timestamp. Excluded after one calendar day.
+
+Missing components are omitted and available weights are rescaled; they are never assigned a neutral score. Ranking requires both fresh stock and sector prices with matching end dates. Scores below 40 are Negative, 40–60 Mixed, and above 60 Positive. When opinion feeds are missing, the column explicitly says **Price only**. These are screening heuristics, not calibrated probabilities, recommendations or evidence of a catalyst. Open saved dashboards also check age before displaying scores.
+
+Optional feeds require your own authorized credentials in the environment of the process launching the app: `ALPHAVANTAGE_API_KEY`, and/or `STOCKTWITS_USERNAME` plus `STOCKTWITS_PASSWORD` (Firestream-authorized account). They are never embedded in the dashboard. Provider quotas and licensing apply; a website subscription does not necessarily include API access. Without credentials, momentum still works and opinion components show unavailable. See [Alpha Vantage](https://www.alphavantage.co/documentation/#news-sentiment) and [Stocktwits Firestream](https://firestream.stocktwits.com/documentation/sentiment-detail).
+
+Sentiment is collected automatically during each report build. To refresh it on the saved screen without rescanning IV (while no other build is running):
+
+```sh
+python -m highiv sentiment
+```
+
+This preserves the underlying market-data generation timestamp. It uses saved stock prices and fetches benchmarks; stale or mismatched stock dates require a normal data refresh before ranking resumes.
+
 ## Company logos
 
 Displayed companies use 48-pixel WebP logos (shown at 24 pixels), cached in `data/logos` for 90 days and embedded in saved dashboards for offline use. Images come from Financial Modeling Prep using the full listing symbol. Missing logos fall back to ticker initials and are retried after a day. Source downloads are capped at 256 KB and encoded icons at 12 KB; no API key is required for this image endpoint. Logo availability depends on the provider.

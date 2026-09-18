@@ -29,6 +29,7 @@ class TempProjectTest(unittest.TestCase):
     def setUp(self):
         self.stack = ExitStack()
         self.stack.enter_context(patch("highiv.logos.fetch", return_value=None))
+        self.stack.enter_context(patch("highiv.sentiment.collect", return_value={}))
         self.addCleanup(self.stack.close)
         self.root = Path(self.stack.enter_context(TemporaryDirectory()))
         for name, value in {

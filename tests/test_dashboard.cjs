@@ -29,6 +29,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     rows: options.rows || [row],
     watchlist: options.watchlist || [],
     universe_by_cap: options.stats,
+    macro_sentiment: options.macro,
   };
   const elements = new Map();
   function element(id) {
@@ -64,6 +65,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     localStorage: { getItem: () => options.saved ? JSON.stringify(options.saved) : null, setItem: (k, v) => { storage[k] = JSON.parse(v); } },
     CSS: { escape: value => value },
     Intl,
+    Date: class extends Date { static now() { return Date.parse('2026-09-18T15:00:00Z'); } },
   });
   const collapsed = element('rows').innerHTML;
   if (!options.rows) element('rows').handlers.click({ target: {
@@ -229,4 +231,45 @@ test('logos render as small embedded WebP with initials fallback',()=>{
   const missing=renderEarnings(null,{logo_webp:null});
   assert.match(missing.collapsed,/logo-initials/);
   assert.doesNotMatch(missing.collapsed,/data:image\/webp/);
+});
+
+const sentimentFixture = (score, date = '2026-09-17') => ({
+  method: 'Test formula, not a prediction.', benchmark: 'XLK', components: [
+    {key:'stock', score, as_of:date, weight:40, detail:'Observed <only>', source:'Yahoo', url:'https://example.com/history'},
+    {key:'sector', score, as_of:date, weight:30, detail:'Relative to SPY'},
+    {key:'news', score:null, weight:20, detail:'Not configured'},
+    {key:'social', score:null, weight:10, detail:'Not configured'},
+  ],
+});
+
+test('sentiment keeps missing data unknown and expands the evidence with safe links', () => {
+  const app = renderEarnings(null, {sentiment:sentimentFixture(75)});
+  assert.match(app.collapsed, /75\/100 · Positive/);
+  assert.match(app.collapsed, /Price only · 70% coverage/);
+  assert.match(app.expanded, /Observed &lt;only&gt;/);
+  assert.match(app.expanded, /colspan="18"/);
+  assert.match(app.expanded, /Base weight 40% · effective 57%/);
+  const missing = renderEarnings(null);
+  assert.match(missing.collapsed, /Insufficient evidence/);
+  assert.doesNotMatch(missing.collapsed, /50\/100/);
+});
+
+test('sentiment sorts both directions with stale and unknown rows always last', () => {
+  const rows = capRows().slice(0,4).map((r,i)=>({...r, sentiment:i===3 ? undefined : sentimentFixture([75,25,95][i],i===2?'2026-09-01':'2026-09-17')}));
+  const app = renderEarnings(null, {}, {rows});
+  const sort = () => app.element('thead').handlers.click({target:{closest:()=>({dataset:{sort:'sentiment'}})}});
+  sort(); assert.deepEqual(symbols(app), ['MID0','MID1','MID2','MID3']);
+  sort(); assert.deepEqual(symbols(app), ['MID1','MID0','MID2','MID3']);
+});
+
+test('macro excludes stale data and retains source observation dates', () => {
+  const app = renderEarnings(null, {}, {macro:{cards:[
+    {key:'vix', value:15, reading:'15.00', status:'ok', as_of:'2026-09-17', max_age:4, signal:'Calm', direction:1},
+    {key:'aaii', value:-25, reading:'-25 pp', status:'ok', as_of:'2026-08-01', max_age:10, signal:'Bearish', direction:-1},
+  ]}});
+  assert.equal(app.element('macro-summary').textContent, 'Limited coverage');
+  assert.match(app.element('macro-note').textContent, /1\/4 fresh readings/);
+  assert.match(app.element('macro-cards').innerHTML, /Stale · excluded/);
+  assert.match(app.element('macro-cards').innerHTML, /As of 2026-08-01/);
+  assert.match(app.element('macro-cards').innerHTML, /Unavailable/);
 });

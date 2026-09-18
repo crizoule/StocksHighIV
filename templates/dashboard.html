@@ -17,6 +17,13 @@
     <dl class="session" id="session"></dl>
   </header>
 
+  <section class="macro panel" aria-labelledby="macro-title">
+    <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title">Macro sentiment</h2></div><span id="macro-summary" class="sentiment-badge">Awaiting data</span></div>
+    <p class="macro-note" id="macro-note"></p>
+    <div class="macro-grid" id="macro-cards"></div>
+    <details class="sentiment-method"><summary>How to read these signals</summary><p>These readings describe different populations and time horizons. VIX measures expected volatility, put/call ratios measure trading activity, AAII surveys the next six months, and CNN combines seven indicators. CNN overlaps with VIX and options data. We show their agreement or disagreement, not an average or a market forecast. Missing and stale readings are excluded. Daily readings become stale after 4 calendar days, AAII after 10, CNN after 2. Fetch time is separate from observation time.</p></details>
+  </section>
+
   <div class="cap-tabs" id="cap-tabs" role="tablist" aria-label="Market capitalization in US dollars">
     <button type="button" role="tab" id="cap-mid" data-cap="mid" aria-selected="true" aria-controls="cap-panel">US$1B–$100B</button>
     <button type="button" role="tab" id="cap-large" data-cap="large" aria-selected="false" aria-controls="cap-panel" tabindex="-1">US$100B+</button>
@@ -72,6 +79,7 @@
           <tr>
             <th class="col-stock" data-sort="rank" aria-sort="none" data-tip-wait="2000" data-tip="Rank by IV30, ticker, exchange, company and what it does. Canadian companies that also trade in the US carry their TSX symbol."><button type="button">Stock</button></th>
             <th class="col-industry" data-sort="industry" aria-sort="none" data-tip-wait="2000" data-tip="Yahoo's industry classification, with the broader sector beneath it. Sort this column to group similar names together."><button type="button">Industry</button></th>
+            <th class="col-sentiment" data-sort="sentiment" aria-sort="none" data-tip-wait="2000" data-tip="Sort by a transparent 0–100 stock/sector sentiment heuristic. Coverage and price-only labels distinguish momentum from news or social opinion. Expand the stock for components, dates, sources and scoring. Not a return forecast."><button type="button">Sentiment<br>Stock / sector</button></th>
             <th data-sort="iv30" aria-sort="descending" data-tip-wait="2000" data-tip="Implied volatility for the next 30 days, annualized: the move the options market is pricing in. The bar compares each stock with the leader in this view."><button type="button">IV30</button></th>
             <th class="col-why" data-sort="iv_why_kind" aria-sort="none" data-tip-wait="2000" data-tip="Business cycle and theme exposures, observed stock/peer moves, and possible company events. These are separate kinds of evidence; none proves the cause of IV. Expand for sources, dates and peer composition. Sort by event evidence."><button type="button">Why this IV</button></th>
             <th data-sort="iv_rank" aria-sort="none" data-tip-wait="2000" data-tip="Where today's IV30 sits between the window's low (0) and high (100)."><button type="button">IV rank</button></th>
