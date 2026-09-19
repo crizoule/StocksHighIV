@@ -41,7 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Fixes the S&P 500 and sentiment chart stopping in 2016 after updating to 1.6.0. Data downloaded by 1.5.0 covered only 10 years and was reused for up to six hours. The app now notices when saved data is too short and downloads the full history, back to 1987.
+    notes = '''Much faster downloads. After each market close, the likely leaders download first and a preliminary dashboard appears in about 20 minutes (instead of about 50), clearly marked; the remaining lower-IV stocks follow and the complete dashboard replaces it. Quotes and macro readings downloaded after the close are reused until the next session trades, so evening, weekend and next-morning refreshes take a minute or two. Company details, charts and headlines now download four stocks at a time.
+
+The first download after updating is still a full one, because quotes saved by earlier versions have no download time.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to load the full history.
 
