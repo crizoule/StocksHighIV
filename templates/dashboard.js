@@ -19,17 +19,19 @@
   const FRAME_WINDOW = { "1H": "1 wk", "4H": "1 mo", "1D": "6 mo", "1W": "2 yr", "1M": "5 yr" };
   const $ = (id) => document.getElementById(id);
 
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set() };
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y" };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
     if (saved && ["all", "us", "tsx"].includes(saved.market)) state.market = saved.market;
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
+    if (saved && ["aaii", "vix", "put_call", "fear_greed"].includes(saved.mseries)) state.mseries = saved.mseries;
+    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y"].includes(saved.mrange)) state.mrange = saved.mrange;
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
-      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame }));
+      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange }));
     } catch (err) { /* ignore */ }
   };
 
@@ -115,6 +117,30 @@
         ((c.evidence || []).length ? `<ul class="sentiment-evidence">${c.evidence.map(e => `<li>${sentimentLink(e.url, e.title)} <span>${esc(e.source)} · ${esc(e.as_of)} · tone ${esc(e.score)}</span></li>`).join("")}</ul>` : "") +
         `</article>`).join("")}</div></div>`;
   };
+  /* AAII is entered by hand each week; the card notes when AAII has published a newer week. */
+  const isoET = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+  const isoDay = d => d.toISOString().slice(0, 10);
+  const plusDays = (d, n) => new Date(d.getTime() + n * 864e5);
+  const aaiiWeek = c => {
+    if (!/^\d{4}-\d{2}-\d{2}/.test(c.as_of || "")) return null;
+    const week = day(c.as_of.slice(0, 10));
+    return c.date_label === "reported" ? plusDays(week, -1) : week;  // spreadsheet rows carry Thursday's report date
+  };
+  // Survey weeks close on Wednesday and AAII publishes them on Thursday: the latest week out as of today (ET).
+  const aaiiPublished = () => { const today = day(isoET.format(new Date(Date.now()))); return plusDays(today, -((today.getUTCDay() + 3) % 7) - 1); };
+  let aaiiEditing = false;
+  const aaiiRows = c => {
+    const latest = aaiiPublished(), week = aaiiWeek(c);
+    const source = c.source_file ? `From AAII's spreadsheet · ${esc(c.source_file)}` : c.entered ? "Entered from AAII's results page" : "";
+    return (source ? `<p class="sentiment-meta">${source}</p>` : "") +
+      ((!week || week < latest) && !aaiiEditing ? `<p class="sentiment-meta aaii-due"><button type="button" class="link-button" data-aaii-edit>` +
+        `${week ? `New week out ${esc(fmtDay(isoDay(plusDays(latest, 1))))} · update` : "Add this week's results"}</button></p>` : "") +
+      (aaiiEditing ? `<form class="aaii-form" data-aaii-form novalidate>` +
+        `<label>Week ending<input type="date" name="week_ending" value="${isoDay(latest)}" required></label>` +
+        ["Bullish", "Neutral", "Bearish"].map(k => `<label>${k} %<input type="number" name="${k.toLowerCase()}" min="0" max="100" step="0.1" inputmode="decimal" required></label>`).join("") +
+        `<p class="sentiment-meta">Copy the three percentages from ${sentimentLink(c.url, "AAII's results page")}.</p>` +
+        `<p class="aaii-error" role="alert"></p><div class="aaii-actions"><button type="submit">Save</button><button type="button" data-aaii-cancel>Cancel</button></div></form>` : "");
+  };
   const replicaParts = parts => (parts || []).length ? `<ul class="replica-parts">${parts.map(p =>
     `<li>${esc(p.name)} · ${isNum(p.score) ? `${nf1.format(p.score)} ${esc(p.rating || "")}` : "Unavailable"}<span>${esc(isNum(p.score) ? p.reading : p.detail || "No fresh input")}</span></li>`).join("")}</ul>` : "";
   const renderMacro = () => {
@@ -138,12 +164,12 @@
       return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.reading || "—")}</div>` +
         `<span class="sentiment-badge ${tone}">${esc(stale ? "Stale · excluded" : c.usable ? c.signal : "Unavailable")}</span>` +
         `<p class="sentiment-meta">${c.as_of ? `As of ${esc(c.as_of)}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? ` · ${esc(c.date_label || "week ending")}` : ""}</p>` +
-        (c.source_file ? `<p class="sentiment-meta">From AAII's spreadsheet · ${esc(c.source_file)}</p>` : "") +
+        (c.key === "aaii" ? aaiiRows(c) : "") +
         (c.replica_of ? `<p class="sentiment-meta">Not CNN's reading · CNN feed ${c.cnn_status === "stale" && c.cnn_as_of ? `stale since ${esc(c.cnn_as_of)}` : "unavailable"}</p>` : "") +
         (replica && c.usable ? `<p class="sentiment-meta">Replica ${nf1.format(replica.value)} · ${replica.value >= c.value ? "+" : "−"}${nf1.format(Math.abs(replica.value - c.value))} vs CNN</p>` : "") +
         (c.ratios ? `<p class="sentiment-meta">Total ${isNum(c.ratios.total) ? nf2.format(c.ratios.total) : "—"} · Index ${isNum(c.ratios.index) ? nf2.format(c.ratios.index) : "—"}</p>` : "") +
         `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No verified reading in this report. The source may block automated access; no substitute value is estimated.")}</p>` +
-        (c.import_url ? `<p>AAII blocks automated downloads. Once a week, ${sentimentLink(c.import_url, "download the AAII spreadsheet")} in your browser and save it to Downloads (or the app's data/imports folder); the next refresh reads it.${c.file_saved ? ` Current file saved ${esc(c.file_saved.slice(0, 10))}.` : ""}</p>` : "") +
+        (c.key === "aaii" ? `<p>AAII blocks automated access, so the app does not fetch this survey. Each Thursday, copy the new week's three percentages from ${sentimentLink(c.url, "AAII's results page")} into this card. <button type="button" class="link-button" data-aaii-edit>Enter or correct a week</button></p>` : "") +
         (c.import_note ? `<p>${esc(c.import_note)}</p>` : "") +
         (c.replica_of ? `<p>${esc(c.method || "")}</p>${replicaParts(c.components)}` : "") +
         (replica ? `<p>Replica cross-check · ${esc(replica.coverage)}/7 components · as of ${esc(replica.as_of)}</p>${replicaParts(replica.components)}` : "") +
@@ -152,7 +178,176 @@
         (c.status === "cached" ? "<p>Last good observation retained; latest refresh failed.</p>" : "") +
         `${sentimentLink(c.url, c.replica_of ? "CNN's index, for comparison" : "Open provider")}</details></article>`;
     }).join("");
+    renderMacroChart();
   };
+
+  /* ---------- macro chart: S&P 500 above, one sentiment series below, on one time axis ---------- */
+  // Two panes rather than two y-scales on one plot: rescaling either axis could make any two lines look related.
+  const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0]];
+  const MACRO_SERIES = {
+    aaii: { short: "AAII spread", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))} pp`, ref: 0, refLabel: "line at 0: bulls = bears" },
+    vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
+    put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
+    fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
+  };
+  const monthsBack = (t, years, months) => { const d = new Date(t); d.setUTCMonth(d.getUTCMonth() - months - 12 * years); return d.getTime(); };
+  let macroCache = null;
+  const macroData = () => {
+    const history = DATA.macro_sentiment?.history;
+    if (macroCache && macroCache.source === history) return macroCache;
+    const points = (pairs) => (Array.isArray(pairs) ? pairs : [])
+      .filter((p) => Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && isNum(p[1]))
+      .map(([d, v]) => ({ t: day(d).getTime(), d, v })).sort((a, b) => a.t - b.t);
+    const series = {};
+    for (const key of Object.keys(MACRO_SERIES)) series[key] = { ...(history?.series?.[key] || {}), points: points(history?.series?.[key]?.points) };
+    macroCache = { source: history, spx: points(history?.spx), series };
+    return macroCache;
+  };
+  const lastAtOrBefore = (points, t) => {  // binary search; weekly AAII carries forward between surveys
+    let lo = 0, hi = points.length - 1, found = null;
+    while (lo <= hi) { const mid = (lo + hi) >> 1; if (points[mid].t <= t) { found = points[mid]; lo = mid + 1; } else hi = mid - 1; }
+    return found;
+  };
+  const pearson = (a, b) => {
+    const n = a.length, ma = a.reduce((s, v) => s + v, 0) / n, mb = b.reduce((s, v) => s + v, 0) / n;
+    let ab = 0, aa = 0, bb = 0;
+    for (let i = 0; i < n; i++) { ab += (a[i] - ma) * (b[i] - mb); aa += (a[i] - ma) ** 2; bb += (b[i] - mb) ** 2; }
+    return aa && bb ? ab / Math.sqrt(aa * bb) : null;
+  };
+  const macroWindow = (spx, points, start, end) => {
+    const px = spx.filter((p) => p.t >= start && p.t <= end), ind = points.filter((p) => p.t >= start && p.t <= end);
+    const values = ind.map((p) => p.v);
+    // Correlation of changes, at the indicator's own frequency: its change vs the S&P 500's return between the same dates.
+    const pairs = ind.map((p) => [p.v, lastAtOrBefore(spx, p.t)]).filter(([, c]) => c);
+    const dv = [], dr = [];
+    for (let i = 1; i < pairs.length; i++) { dv.push(pairs[i][0] - pairs[i - 1][0]); dr.push(pairs[i][1].v / pairs[i - 1][1].v - 1); }
+    return {
+      px, ind, ret: px.length > 1 ? (px[px.length - 1].v / px[0].v - 1) * 100 : null,
+      avg: values.length ? values.reduce((s, v) => s + v, 0) / values.length : null,
+      lo: values.length ? Math.min(...values) : null, hi: values.length ? Math.max(...values) : null,
+      r: dv.length >= 8 ? pearson(dv, dr) : null, n: dv.length,
+    };
+  };
+  const niceTick = (raw) => { const mag = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw); };
+  const ticks = (lo, hi, count) => {
+    const make = (step) => {
+      const out = [];
+      for (let v = Math.ceil(lo / step) * step; v <= hi + step / 1e6; v += step) out.push(Math.round(v / step) * step || 0);  // never "-0"
+      return out;
+    };
+    let step = niceTick((hi - lo) / count || Math.abs(hi) / 10 || 1);
+    if (make(step).length < 3) step = niceTick(step / 2);  // rounding the step up can leave a single label
+    return { values: make(step), step };
+  };
+  const tickLabel = (v, step) => {  // as many decimals as the step needs, and a true minus sign
+    let digits = Math.max(0, Math.ceil(-Math.log10(step) - 1e-9));
+    if (Math.abs(step * 10 ** digits - Math.round(step * 10 ** digits)) > 1e-9) digits += 1;
+    const text = new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(v));
+    return v < 0 ? `−${text}` : text;
+  };
+  const relation = (r) => !isNum(r) ? "—" : `${r >= 0 ? "+" : "−"}${nf2.format(Math.abs(r))} · ${Math.abs(r) < 0.2 ? "little relation" : r > 0 ? "moves with" : "moves against"}`;
+  let macroHover = null;
+  const renderMacroChart = () => {
+    document.querySelectorAll("#macro-series-seg button").forEach((b) => { const on = b.dataset.mseries === state.mseries; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
+    document.querySelectorAll("#macro-range-seg button").forEach((b) => { const on = b.dataset.mrange === state.mrange; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
+    const data = macroData(), meta = MACRO_SERIES[state.mseries], series = data.series[state.mseries];
+    const name = series.name || meta.short;
+    macroHover = null;
+    if (data.spx.length < 2) {
+      $("macro-legend").innerHTML = "";
+      $("macro-plot").innerHTML = `<p class="macro-empty">S&amp;P 500 history appears after the next data refresh.</p>`;
+      $("macro-windows").innerHTML = "";
+      $("macro-chart-note").textContent = "";
+      $("macro-windows-note").textContent = "";
+      return;
+    }
+    const end = data.spx[data.spx.length - 1].t;
+    const [, label, years, months] = MACRO_RANGES.find(([key]) => key === state.mrange);
+    const start = monthsBack(end, years, months);
+    const w = macroWindow(data.spx, series.points, start, end);
+    const first = series.points[0];
+    $("macro-chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
+    const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
+    $("macro-legend").innerHTML =
+      `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% over ${label}` : ""}</span>` +
+      `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>`;
+    const W = Math.max(240, $("macro-plot").clientWidth || 960);
+    const m = { left: 64, right: 14 }, top = 22, h1 = 186, gap = 34, h2 = 104, axis = 22, H = top + h1 + gap + h2 + axis;  // pane labels sit above each pane
+    const x = (t) => m.left + ((t - start) / Math.max(end - start, 1)) * (W - m.left - m.right);
+    const pane = (points, y0, height, ref) => {
+      const values = points.map((p) => p.v).concat(isNum(ref) ? [ref] : []);
+      let lo = Math.min(...values), hi = Math.max(...values);
+      if (lo === hi) { lo -= 1; hi += 1; }
+      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+      const scale = ticks(lo, hi, height > 150 ? 4 : 3);
+      return { y: (v) => y0 + (1 - (v - lo) / (hi - lo)) * height, step: scale.step, ticks: scale.values.filter((v) => v >= lo && v <= hi) };
+    };
+    const path = (points, y) => points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    const top2 = top + h1 + gap;
+    const P = pane(w.px, top, h1), I = w.ind.length ? pane(w.ind, top2, h2, meta.ref) : null;
+    const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
+      `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
+    // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
+    // every other month for six months, even spacing below that.
+    const span = end - start, days = span / 864e5, xTicks = [];
+    if (days <= 120) for (let i = 0; i <= 4; i++) xTicks.push(start + (span * i) / 4);
+    else {
+      const every = days > 6.5 * 365 ? 24 : days > 400 ? 12 : days > 200 ? 3 : 2, first = new Date(start);
+      for (let d = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1)); d.getTime() <= end; d.setUTCMonth(d.getUTCMonth() + 1)) {
+        if ((d.getUTCFullYear() * 12 + d.getUTCMonth()) % every === 0) xTicks.push(d.getTime());
+      }
+    }
+    const xFmt = (t) => { const d = new Date(t); return span <= 120 * 864e5 ? shortDate.format(d) : span <= 400 * 864e5 ? `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCFullYear()}` : String(d.getUTCFullYear()); };
+    const anchor = (t) => x(t) < m.left + 24 ? "start" : x(t) > W - m.right - 24 ? "end" : "middle";
+    const labels = [];  // skip labels that would touch on narrow screens (about 7px per mono character)
+    for (const t of xTicks) if (!labels.length || x(t) - x(labels[labels.length - 1]) >= (xFmt(t).length + 2) * 7) labels.push(t);
+    const markers = I && w.ind.length <= 60 && series.frequency === "weekly"
+      ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
+    $("macro-plot").innerHTML =
+      `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 over ${label} above ${esc(name)} on the same dates">` +
+      grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y)}"/>` +
+      `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500</text>` +
+      (I ? grid(I, m.left - 8) +
+        (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
+        `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
+        : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
+      `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}</tspan>` : ""}</text>` +
+      labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
+      `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/><circle class="dot-ind" r="4"/></g>` +
+      `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
+    macroHover = { x, P, I, w, start, end, name, meta, W, m };
+    const unit = series.frequency === "weekly" ? "weekly" : "daily";
+    $("macro-windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th><th scope="col">${esc(meta.short)} average</th>` +
+      `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of ${unit} changes</th></tr></thead><tbody>` +
+      MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
+        const s = macroWindow(data.spx, series.points, monthsBack(end, y, mo), end);
+        return `<tr${key === state.mrange ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
+          `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` +
+          `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
+          `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
+      }).join("") + "</tbody>";
+    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. It describes the past, not a forecast; needs 8 changes.`;
+  };
+  const hoverMacro = (ev) => {
+    const svg = ev.target.closest(".macro-svg");
+    if (!svg || !macroHover) return;
+    const { x, P, I, w, start, end, name, meta, W, m } = macroHover;
+    const box = svg.getBoundingClientRect();
+    const t = start + ((ev.clientX - box.left) * (W / box.width) - m.left) / (W - m.left - m.right) * (end - start);
+    const px = lastAtOrBefore(w.px, t) || w.px[0];
+    if (!px) return;
+    const ind = I ? lastAtOrBefore(w.ind, px.t) : null;
+    const hair = svg.querySelector(".xhair");
+    hair.removeAttribute("hidden");
+    hair.querySelector("line").setAttribute("x1", x(px.t).toFixed(1));
+    hair.querySelector("line").setAttribute("x2", x(px.t).toFixed(1));
+    const [dotPx, dotInd] = hair.querySelectorAll("circle");
+    dotPx.setAttribute("cx", x(px.t).toFixed(1)); dotPx.setAttribute("cy", P.y(px.v).toFixed(1));
+    if (ind) { dotInd.removeAttribute("hidden"); dotInd.setAttribute("cx", x(px.t).toFixed(1)); dotInd.setAttribute("cy", I.y(ind.v).toFixed(1)); }
+    else dotInd.setAttribute("hidden", "");
+    showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
+  };
+  const leaveMacro = () => { $("macro-plot").querySelector?.(".xhair")?.setAttribute("hidden", ""); hideTip(); };
 
   /* ---------- views ---------- */
   const onTsx = (r) => r.market === "CA" || Boolean(r.also_listed);
@@ -756,6 +951,7 @@
 
   document.addEventListener("pointermove", (ev) => {
     const target = ev.target instanceof Element ? ev.target : null;
+    if (target && target.closest(".macro-svg")) return;  // the macro chart runs its own crosshair
     const spark = target && target.closest(".spark");
     if (spark) {
       dropTip();
@@ -780,11 +976,11 @@
   window.addEventListener("scroll", dropTip, { passive: true });
 
   /* Segmented controls: click, plus arrow keys inside the group. */
-  const wireSeg = (id, attr, apply, selected = "aria-checked") => {
+  const wireSeg = (id, attr, apply, selected = "aria-checked", redraw = render) => {
     const seg = $(id);
     seg.addEventListener("click", (ev) => {
       const button = ev.target.closest(`button[data-${attr}]`);
-      if (button) { apply(button.dataset[attr]); render(); }
+      if (button) { apply(button.dataset[attr]); redraw(); }
     });
     seg.addEventListener("keydown", (ev) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(ev.key)) return;
@@ -795,13 +991,17 @@
         : (current + (ev.key === "ArrowRight" ? 1 : buttons.length - 1)) % buttons.length;
       const next = buttons[index];
       apply(next.dataset[attr]);
-      render();
+      redraw();
       next.focus();
     });
   };
   wireSeg("cap-tabs", "cap", (v) => { state.cap = v; state.open.clear(); persist(); }, "aria-selected");
   wireSeg("market-seg", "market", (v) => { state.market = v; persist(); });
   wireSeg("frame-seg", "frame", (v) => { state.frame = v; persist(); });
+  wireSeg("macro-series-seg", "mseries", (v) => { state.mseries = v; persist(); }, "aria-checked", renderMacroChart);
+  wireSeg("macro-range-seg", "mrange", (v) => { state.mrange = v; persist(); }, "aria-checked", renderMacroChart);
+  $("macro-plot").addEventListener("pointermove", hoverMacro);
+  $("macro-plot").addEventListener("pointerleave", leaveMacro);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });
 
   document.querySelector("thead").addEventListener("click", (ev) => {
@@ -844,6 +1044,39 @@
   });
 
   if ("ResizeObserver" in window) new ResizeObserver(() => drawDistribution(lastCutoff)).observe($("dist-frame"));
+  if ("ResizeObserver" in window) new ResizeObserver(() => renderMacroChart()).observe($("macro-plot"));
+
+  $("macro-cards").addEventListener("click", (ev) => {
+    const edit = ev.target.closest("[data-aaii-edit]");
+    if (!edit && !ev.target.closest("[data-aaii-cancel]")) return;
+    aaiiEditing = Boolean(edit);
+    renderMacro();
+  });
+  $("macro-cards").addEventListener("submit", async (ev) => {
+    const form = ev.target.closest("form[data-aaii-form]");
+    if (!form) return;
+    ev.preventDefault();
+    const fail = message => { form.querySelector(".aaii-error").textContent = message; };
+    const share = name => Number.parseFloat(form.elements[name].value);
+    const body = {week_ending: form.elements.week_ending.value, bullish: share("bullish"), neutral: share("neutral"), bearish: share("bearish")};
+    const parts = [body.bullish, body.neutral, body.bearish];
+    if (!parts.every(isNum)) return fail("Enter all three percentages.");
+    const total = parts.reduce((sum, v) => sum + v, 0);
+    if (Math.abs(total - 100) > 0.5) return fail(`These add up to ${nf1.format(total)}%, not 100%.`);
+    try {
+      const status = await (await fetch("/api/status")).json();
+      const response = await fetch("/api/aaii", {method:"POST", headers:{"Content-Type":"application/json", "X-App-Token":status.token}, body:JSON.stringify(body)});
+      const result = await response.json();
+      if (!response.ok) return fail(result.error || "This week could not be saved.");
+      DATA.macro_sentiment = DATA.macro_sentiment || {};
+      const cards = DATA.macro_sentiment.cards || [];
+      const old = cards.find(c => c.key === "aaii") || {};
+      DATA.macro_sentiment.cards = [...cards.filter(c => c.key !== "aaii"),
+        {key:"aaii", name:old.name || "AAII sentiment", url:old.url || "https://www.aaii.com/sentimentsurvey", max_age:old.max_age || 10, ...result}];
+      aaiiEditing = false;
+      renderMacro();
+    } catch { fail("Open the dashboard from the StocksHighIV app to save AAII results."); }
+  });
 
   window.addEventListener("highiv-watchlist", event => { watched = new Set(event.detail); render(); });
   render();

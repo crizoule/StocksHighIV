@@ -21,6 +21,31 @@
     <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title">Macro sentiment</h2></div><span id="macro-summary" class="sentiment-badge">Awaiting data</span></div>
     <p class="macro-note" id="macro-note"></p>
     <div class="macro-grid" id="macro-cards"></div>
+    <figure class="macro-chart" aria-labelledby="macro-chart-title">
+      <figcaption class="macro-chart-head">
+        <div><span class="fig-title" id="macro-chart-title">S&amp;P 500 and sentiment</span><span class="fig-note" id="macro-chart-note"></span></div>
+        <div class="macro-chart-controls">
+          <div class="seg" id="macro-series-seg" role="radiogroup" aria-label="Sentiment series">
+            <button type="button" role="radio" data-mseries="aaii" aria-checked="true">AAII</button>
+            <button type="button" role="radio" data-mseries="vix" aria-checked="false" tabindex="-1">VIX</button>
+            <button type="button" role="radio" data-mseries="put_call" aria-checked="false" tabindex="-1">Put/call</button>
+            <button type="button" role="radio" data-mseries="fear_greed" aria-checked="false" tabindex="-1">Fear &amp; Greed</button>
+          </div>
+          <div class="seg frames" id="macro-range-seg" role="radiogroup" aria-label="Time range">
+            <button type="button" role="radio" data-mrange="1M" aria-checked="false" tabindex="-1">1M</button>
+            <button type="button" role="radio" data-mrange="3M" aria-checked="false" tabindex="-1">3M</button>
+            <button type="button" role="radio" data-mrange="6M" aria-checked="false" tabindex="-1">6M</button>
+            <button type="button" role="radio" data-mrange="1Y" aria-checked="true">1Y</button>
+            <button type="button" role="radio" data-mrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
+            <button type="button" role="radio" data-mrange="10Y" aria-checked="false" tabindex="-1">10Y</button>
+          </div>
+        </div>
+      </figcaption>
+      <div class="macro-legend" id="macro-legend"></div>
+      <div class="macro-plot" id="macro-plot"></div>
+      <div class="macro-windows-wrap"><table class="macro-windows" id="macro-windows"></table></div>
+      <p class="macro-note" id="macro-windows-note"></p>
+    </figure>
     <details class="sentiment-method"><summary>How to read these signals</summary><p>These readings describe different populations and time horizons. VIX measures expected volatility, put/call ratios measure trading activity, AAII surveys the next six months, and CNN combines seven indicators. CNN overlaps with VIX and options data. We show their agreement or disagreement, not an average or a market forecast. Missing and stale readings are excluded. Daily readings become stale after 4 calendar days, AAII after 10, CNN after 2. Fetch time is separate from observation time.</p></details>
   </section>
 

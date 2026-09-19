@@ -90,24 +90,70 @@ class MacroTests(unittest.TestCase):
         stale_replica = card({"fear_greed": {**replica, "as_of": "2026-09-01"}})
         self.assertEqual((stale_replica["name"], stale_replica["status"]), ("CNN Fear & Greed", "unavailable"))
 
-    def test_saved_aaii_spreadsheet_stands_in_for_a_blocked_page_unless_the_page_is_newer(self):
+    def test_aaii_card_uses_the_latest_week_from_the_page_an_entry_or_an_imported_spreadsheet(self):
         imported = {"status": "ok", "value": -35.0, "reading": "-35.0 pp", "signal": "Bearish tilt", "direction": -1,
-                    "as_of": "2026-09-17", "date_label": "reported", "source_file": "sentiment.xls",
+                    "as_of": "2026-09-10", "date_label": "reported", "source_file": "sentiment.xls",
                     "file_saved": "2026-09-18T12:00:00+00:00", "signature": ["sentiment.xls", 1, 1]}
         blocked = {"status": "unavailable", "error": "Provider blocked"}
-        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+        bundled = {"status": "ok", "value": -20.0, "as_of": "2026-09-10", "date_label": "reported", "source": "bundled"}
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)), \
+                patch.object(s.aaii, "bundled_reading", return_value=bundled):
             with patch.object(s.aaii, "imported", return_value=(imported, [])):
+                self.assertEqual(s.with_aaii_import(blocked, TODAY)["source_file"], "sentiment.xls")  # same week: import first
+                s.aaii.save_week(temp, "2026-09-16", 28.8, 17.9, 53.3, TODAY)
                 item = s.with_aaii_import(blocked, TODAY)
-                self.assertEqual((item["value"], item["source_file"], item["import_url"]), (-35.0, "sentiment.xls", s.aaii.DOWNLOAD_URL))
+                self.assertEqual((item["value"], item["entered"]), (-24.5, True))  # the entered week is newer
                 newer = {"status": "ok", "value": 5.0, "as_of": "2026-09-23"}
                 self.assertEqual(s.with_aaii_import(newer, date(2026, 9, 24))["value"], 5.0)
             stored = json.loads((Path(temp) / "sentiment" / "aaii-import.json").read_text(encoding="utf-8"))
-            self.assertEqual(stored["as_of"], "2026-09-17")  # kept for later refreshes, even if the file goes away
-            with patch.object(s.aaii, "imported", return_value=(None, ["The app cannot read Downloads."])):
+            self.assertEqual(stored["as_of"], "2026-09-10")  # kept for later refreshes, even if the file goes away
+            with patch.object(s.aaii, "imported", return_value=(None, ["sentiment.xls could not be read."])):
                 item = s.with_aaii_import(blocked, TODAY)
-            self.assertEqual((item["status"], item["import_note"]), ("unavailable", "The app cannot read Downloads."))
+            self.assertEqual(item["import_note"], "sentiment.xls could not be read.")
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)), \
+                patch.object(s.aaii, "imported", return_value=(None, [])):
+            self.assertEqual(s.with_aaii_import(blocked, TODAY)["source"], "AAII history bundled with the app")
         card = evaluate(sources={"macro": {"aaii": {**imported, "as_of": "2026-09-03"}}})["macro_sentiment"]["cards"][2]
         self.assertEqual(card["status"], "stale")  # a spreadsheet more than 10 days old is excluded like any AAII reading
+
+    def test_vix_and_cnn_keep_dated_history_for_the_chart(self):
+        rows = "DATE,OPEN,HIGH,LOW,CLOSE\n01/02/2015,1,1,1,19.2\n09/16/2026,1,1,1,17.71\n09/17/2026,1,1,1,15.44\n"
+        self.assertEqual(s.parse_vix(rows, TODAY)["history"], [["2026-09-16", 17.71], ["2026-09-17", 15.44]])  # 10 years
+        raw = {"fear_and_greed": {"score": 28.6, "rating": "fear", "timestamp": "2026-09-18T18:13:36+00:00"},
+               "fear_and_greed_historical": {"data": [{"x": 1789603200000, "y": 28.29}, {"x": 1789689600000, "y": "bad"},
+                                                      {"x": 1789862400000, "y": 30}]}}
+        self.assertEqual(s.parse_cnn(json.dumps(raw), TODAY)["history"], [["2026-09-17", 28.3]])  # no bad or future points
+        asked = []
+        def fake(client, url):
+            asked.append(url)
+            if url != s.CNN_URL:
+                raise ValueError("Provider unavailable (HTTP 500)")
+            return json.dumps(raw)
+        with patch.object(s, "request_text", fake):
+            self.assertEqual(s.fetch_cnn(None, TODAY)["value"], 28.6)
+        self.assertEqual(asked, [f"{s.CNN_URL}/2021-09-18", s.CNN_URL])
+
+    def test_put_call_chart_series_is_a_five_session_equity_average(self):
+        sessions = {f"2026-09-{d:02d}": {"equity": [100, p], "etp": [1, 1]} for d, p in zip((8, 9, 10, 11, 14, 15), (50, 60, 70, 80, 90, 100))}
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+            self.assertEqual(s.put_call_series(), [])
+            s.write_json(Path(temp) / "sentiment" / "put_call_history.json", {"sessions": sessions})
+            self.assertEqual(s.put_call_series(), [["2026-09-14", 0.7], ["2026-09-15", 0.8]])
+
+    def test_chart_history_prefers_cnn_and_cards_never_carry_it(self):
+        replica = {"status": "ok", "value": 31.0, "as_of": "2026-09-17", "history": [["2026-09-17", 31.0]]}
+        short_cnn = {"status": "ok", "value": 28.6, "as_of": "2026-09-18", "history": [["2026-09-17", 28.3]]}
+        chart = s.chart_history({"cnn": short_cnn, "fear_greed": replica}, {"spx": {"points": [["2026-09-17", 7637.76]]}})
+        self.assertEqual((chart["series"]["fear_greed"]["name"], chart["series"]["fear_greed"]["points"]),
+                         ("Fear & Greed replica", [["2026-09-17", 31.0]]))
+        long_cnn = {**short_cnn, "history": [[f"2026-08-{d:02d}", 40.0] for d in range(1, 26)]}
+        self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["name"], "CNN Fear & Greed")
+        sources = {"macro": {"vix": {"status": "ok", "value": 15.4, "as_of": "2026-09-17", "history": [["2026-09-17", 15.4]]},
+                             "cnn": long_cnn, "fear_greed": replica}, "history": {"spx": {"points": [["2026-09-17", 7637.76]]}}}
+        macro = evaluate(sources=sources)["macro_sentiment"]
+        self.assertTrue(all("history" not in card and "history" not in (card.get("replica") or {}) for card in macro["cards"]))
+        self.assertEqual(macro["history"]["series"]["vix"]["points"], [["2026-09-17", 15.4]])
+        self.assertEqual(macro["history"]["spx"], [["2026-09-17", 7637.76]])
 
     def test_put_call_history_fills_newest_first_and_never_relabels_a_session(self):
         days = [date(2026, 9, d) for d in (14, 15, 16, 17)]

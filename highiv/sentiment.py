@@ -36,6 +36,8 @@ MACRO = {
     "aaii": ("AAII sentiment", AAII_URL, 10),
     "cnn": ("CNN Fear & Greed", CNN_PAGE, 2),
 }
+HISTORY_DAYS = 3660               # the macro chart's longest range: 10 years
+CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
 PUT_CALL_BACKFILL_SECONDS = 180   # Cboe history fills over a few refreshes, never in one long burst
@@ -116,7 +118,9 @@ def parse_vix(text, today):
         if when <= today:
             rows.append((when, number(item["CLOSE"], 0.01, 200)))
     when, value = max(rows)
+    since = when - timedelta(days=HISTORY_DAYS)
     return dict(as_of=when.isoformat(), value=value, reading=f"{value:.2f}",
+                history=[[d.isoformat(), v] for d, v in sorted(rows) if d >= since],
                 signal="Calm" if value < 20 else "Elevated uncertainty" if value < 30 else "High stress",
                 direction=1 if value < 20 else 0 if value < 30 else -1,
                 detail="Cboe daily close; expected 30-day S&P 500 volatility, not direction. Heuristic: <20 calm, 20–30 elevated, ≥30 stressed.")
@@ -162,12 +166,21 @@ def parse_aaii(html, today):
 
 
 def parse_cnn(text, today):
-    item = json.loads(text)["fear_and_greed"]
+    data = json.loads(text)
+    item = data["fear_and_greed"]
     value = number(item["score"], 0, 100)
     when = datetime.fromisoformat(item["timestamp"].replace("Z", "+00:00"))
     if when.tzinfo is None:
         raise ValueError("CNN timestamp has no timezone")
+    history = {}
+    for point in (data.get("fear_and_greed_historical") or {}).get("data", []):
+        try:  # closed sessions are stamped at 00:00 UTC of the market date
+            day = datetime.fromtimestamp(point["x"] / 1000, timezone.utc).date()
+            history[day] = round(number(point["y"], 0, 100), 1)
+        except (KeyError, TypeError, ValueError, OverflowError, OSError):
+            continue
     return dict(as_of=when.date().isoformat(), observed_at=when.isoformat(), value=value, reading=f"{value:.1f}/100",
+                history=[[d.isoformat(), history[d]] for d in sorted(history) if d <= today],
                 signal=str(item["rating"]).title(), direction=1 if value >= 55 else -1 if value <= 45 else 0,
                 detail="CNN’s seven-component Fear & Greed index. Includes volatility and options inputs already shown here, so it is not an independent confirmation. Public website feed may be unavailable; no official API guarantee.")
 
@@ -305,7 +318,44 @@ def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=
 
 def fetch_fear_greed(client, now):
     progress.emit(activity="Building the Fear & Greed replica from public data")
-    return fear_greed.replica(*fear_greed_inputs(client, now))
+    inputs, notes = fear_greed_inputs(client, now)
+    item = fear_greed.replica(inputs, notes)
+    scores = fear_greed.history(inputs, require=fear_greed.MIN_COMPONENTS)["score"].dropna()
+    return {**item, "history": [[d.date().isoformat(), round(float(v), 1)] for d, v in scores.items()]}
+
+
+def fetch_cnn(client, today):
+    try:
+        text = request_text(client, f"{CNN_URL}/{(today - timedelta(days=CNN_HISTORY_DAYS)).isoformat()}")
+    except ValueError:  # an unavailable history window: fall back to CNN's default year
+        text = request_text(client, CNN_URL)
+    return parse_cnn(text, today)
+
+
+def fetch_spx_history(now):
+    local = now.astimezone(context.MARKET_TZ)
+    frame = fear_greed.completed(yf.download("^GSPC", period="10y", interval="1d", auto_adjust=False, progress=False,
+                                             multi_level_index=False, timeout=20), local.date(), local.hour)
+    closes = frame["Close"].dropna()
+    if len(closes) < 250:
+        raise ValueError("Insufficient S&P 500 history")
+    return {"points": [[d.date().isoformat(), round(number(v, 1), 2)] for d, v in closes.items()]}
+
+
+def put_call_series():
+    """Five-session average of Cboe's daily equity put/call ratio, from the stored history, oldest first."""
+    try:
+        history = json.loads((config.DATA_DIR / "sentiment" / "put_call_history.json").read_text(encoding="utf-8"))["sessions"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+    daily = []
+    for day in sorted(history):
+        try:
+            calls, puts = history[day]["equity"]
+            daily.append((day, puts / calls))
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            continue
+    return [[daily[i][0], round(sum(v for _, v in daily[i - 4:i + 1]) / 5, 3)] for i in range(4, len(daily))]
 
 
 def check_fear_greed(now=None, years=3):
@@ -360,19 +410,22 @@ def parse_social(text):
 def collect(rows, *, now=None):
     now = now or datetime.now(timezone.utc)
     today = now.astimezone(context.MARKET_TZ).date()
-    result = {"collected_at": now.isoformat(), "macro": {}, "benchmarks": {}, "social": {}}
+    result = {"collected_at": now.isoformat(), "macro": {}, "benchmarks": {}, "social": {}, "history": {}}
     with httpx.Client(headers={"User-Agent": config.USER_AGENT}, timeout=12, follow_redirects=True) as client:
         jobs = {}
-        parsers = {"vix": (VIX_URL, parse_vix), "put_call": (PC_URL, parse_put_call),
-                   "aaii": (AAII_URL, parse_aaii), "cnn": (CNN_URL, parse_cnn)}
-        for key, (url, parser) in parsers.items():
-            def macro_fetch(url=url, parser=parser):
-                item = parser(request_text(client, url), today)
+        parsers = {"vix": lambda: parse_vix(request_text(client, VIX_URL), today),
+                   "put_call": lambda: parse_put_call(request_text(client, PC_URL), today),
+                   "aaii": lambda: parse_aaii(request_text(client, AAII_URL), today),
+                   "cnn": lambda: fetch_cnn(client, today)}
+        for key, fetch in parsers.items():
+            def macro_fetch(fetch=fetch):
+                item = fetch()
                 if iso_date(item["as_of"]) > today:
                     raise ValueError("Future observation")
                 return item
             jobs[("macro", key)] = macro_fetch
         jobs[("macro", "fear_greed")] = lambda: fetch_fear_greed(client, now)
+        jobs[("history", "spx")] = lambda: fetch_spx_history(now)
         symbols = {SECTORS.get(str(row.get("sector") or "").lower()) for row in rows} - {None}
         for symbol in sorted(symbols | {"SPY"}):
             jobs[("benchmarks", symbol)] = lambda symbol=symbol: fetch_benchmark(symbol)
@@ -401,11 +454,13 @@ def collect(rows, *, now=None):
                 result[kind][key] = value
                 progress.emit(activity=f"Sentiment sources checked: {i}/{len(jobs)}")
     result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
+    result["history"]["aaii"] = aaii.spread_series(config.DATA_DIR, result["macro"]["aaii"])
+    result["history"]["put_call"] = put_call_series()
     return result
 
 
 def with_aaii_import(live, today, folders=None):
-    """AAII's page when it answers; otherwise, or when newer, the spreadsheet the user saved. Read every refresh."""
+    """The latest survey week among AAII's page, the week entered by hand, and a spreadsheet in data/imports."""
     store = config.DATA_DIR / "sentiment" / "aaii-import.json"
     try:
         saved = json.loads(store.read_text(encoding="utf-8"))
@@ -414,10 +469,8 @@ def with_aaii_import(live, today, folders=None):
     found, notes = aaii.imported(today, saved, folders)
     if found and found is not saved:
         write_json(store, found)
-    item = live
-    if found and not (live.get("status") in ("ok", "cached") and str(live.get("as_of", "")) > found["as_of"]):
-        item = found
-    return {**item, "import_url": aaii.DOWNLOAD_URL, **({"import_note": " ".join(notes)} if notes else {})}
+    item = aaii.newest(live, aaii.entered(config.DATA_DIR), found, aaii.bundled_reading()) or live
+    return {**item, **({"import_note": " ".join(notes)} if notes else {})}
 
 
 def usable(item, today, max_age):
@@ -434,6 +487,19 @@ def with_replica(cnn, replica, today):
         return {**cnn, "replica": {k: replica.get(k) for k in keys}}
     return {**replica, "key": "cnn", "name": "Fear & Greed replica", "url": CNN_PAGE, "max_age": REPLICA_MAX_AGE,
             "replica_of": "CNN Fear & Greed", "cnn_status": cnn.get("status"), "cnn_as_of": cnn.get("as_of")}
+
+
+def chart_history(macro, history):
+    """S&P 500 closes and each sentiment series, as [date, value] pairs, for the dashboard's macro chart."""
+    cnn = (macro.get("cnn") or {}).get("history") or []
+    fear = (dict(name="CNN Fear & Greed", source="CNN", points=cnn) if len(cnn) >= 20 else
+            dict(name="Fear & Greed replica", source="Replica from public data", points=(macro.get("fear_greed") or {}).get("history") or []))
+    return {"spx": (history.get("spx") or {}).get("points") or [], "series": {
+        "aaii": dict(name="AAII bull–bear spread", unit=" pp", source="AAII weekly survey", frequency="weekly", points=history.get("aaii") or []),
+        "vix": dict(name="VIX", unit="", source="Cboe", frequency="daily", points=(macro.get("vix") or {}).get("history") or []),
+        "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe", frequency="daily", points=history.get("put_call") or []),
+        "fear_greed": {**fear, "unit": "", "frequency": "daily"},
+    }}
 
 
 def unavailable(key, reason):
@@ -494,16 +560,18 @@ def news_component(row, feed, now):
 def evaluate(payload, inputs, *, now=None):
     now = now or datetime.now(timezone.utc)
     today = now.astimezone(context.MARKET_TZ).date()
+    macro = inputs.get("macro", {})
     cards = []
     for key, (name, url, max_age) in MACRO.items():
-        item = {**inputs.get("macro", {}).get(key, {"status": "unavailable"}), "key": key,
-                "name": name, "url": url, "max_age": max_age}
+        item = {**macro.get(key, {"status": "unavailable"}), "key": key, "name": name, "url": url, "max_age": max_age}
         if item.get("as_of") and not fresh(item["as_of"], today, max_age):
             item["status"] = "stale"
         if key == "cnn":
-            item = with_replica(item, inputs.get("macro", {}).get("fear_greed") or {}, today)
+            item = with_replica(item, macro.get("fear_greed") or {}, today)
+        item.pop("history", None)  # histories live once, in the chart data below
         cards.append(item)
-    payload["macro_sentiment"] = {"cards": cards, "checked_at": inputs.get("collected_at")}
+    payload["macro_sentiment"] = {"cards": cards, "checked_at": inputs.get("collected_at"),
+                                  "history": chart_history(macro, inputs.get("history", {}))}
     benchmarks = {key: momentum(item, now) for key, item in inputs.get("benchmarks", {}).items()}
     market = benchmarks.get("SPY")
     for row in payload["rows"]:

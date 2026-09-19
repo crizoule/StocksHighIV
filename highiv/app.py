@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 import webbrowser
 
-from . import config, watchlist
+from . import aaii, config, watchlist
 
 APP_ID = 'stockshighiv-local-v1'
 
@@ -285,7 +285,7 @@ def handler(app):
                     # Upgrade presentation while retaining the exact saved market data.
                     payload_match = re.search(rb'<script id="payload" type="application/json">(.*?)</script>', body, re.S)
                     if payload_match:
-                        saved_payload = json.loads(payload_match[1])
+                        saved_payload = aaii.apply_entered(json.loads(payload_match[1]), app.data_root/'data')
                         for row in saved_payload.get('rows', []):
                             symbol = row.get('yahoo_symbol') or row.get('symbol', '')
                             if not row.get('logo_webp') and re.fullmatch(r'[A-Z0-9.\-]{1,24}', symbol):
@@ -316,7 +316,7 @@ def handler(app):
             expected_origin = f'http://127.0.0.1:{self.server.server_port}'
             if not self.local_host() or self.headers.get('Origin') != expected_origin or not secrets.compare_digest(self.headers.get('X-App-Token', ''), app.token):
                 return self.send(403, '{}')
-            if self.path not in ('/api/start', '/api/settings', '/api/watchlist', '/api/prepare-update', '/api/cancel-update', '/api/shutdown'):
+            if self.path not in ('/api/start', '/api/settings', '/api/watchlist', '/api/aaii', '/api/prepare-update', '/api/cancel-update', '/api/shutdown'):
                 return self.send(404, '{}')
             try:
                 length = int(self.headers.get('Content-Length', 0))
@@ -336,6 +336,14 @@ def handler(app):
                     with app.lock:
                         symbols = watchlist.change(app.data_root, payload.get('symbol'), payload.get('action'))
                     return self.send(200, json.dumps({'watchlist': symbols}))
+                if self.path == '/api/aaii':
+                    try:
+                        with app.lock:
+                            reading = aaii.save_week(app.data_root/'data', payload.get('week_ending'), payload.get('bullish'),
+                                                     payload.get('neutral'), payload.get('bearish'), app.eastern_now().date())
+                    except (ValueError, RuntimeError) as exc:  # invalid entry, or time-zone data not installed yet
+                        return self.send(400, json.dumps({'error': str(exc)}))
+                    return self.send(200, json.dumps(reading))
                 if self.path == '/api/settings':
                     app.save_settings(payload)
                     return self.send(200, '{}')

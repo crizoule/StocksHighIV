@@ -66,6 +66,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     CSS: { escape: value => value },
     Intl,
     Date: class extends Date { static now() { return Date.parse('2026-09-18T15:00:00Z'); } },
+    fetch: options.fetch,
   });
   const collapsed = element('rows').innerHTML;
   if (!options.rows) element('rows').handlers.click({ target: {
@@ -280,19 +281,81 @@ test('fear and greed replica is labelled as a stand-in or as a cross-check, neve
   assert.doesNotMatch(crossCheck.element('macro-cards').innerHTML, /Not CNN's reading/);
 });
 
-test('aaii card names the imported spreadsheet and always links the weekly download', () => {
-  const url = 'https://www.aaii.com/files/surveys/sentiment.xls';
-  const imported = renderEarnings(null, {}, {macro:{cards:[{key:'aaii', value:-24.5, reading:'-24.5 pp', status:'ok', as_of:'2026-09-17',
-    max_age:10, signal:'Bearish tilt', direction:-1, date_label:'reported', source_file:'sentiment (1).xls',
-    file_saved:'2026-09-18T12:00:00+00:00', import_url:url}]}}).element('macro-cards').innerHTML;
+test('aaii card shows its source, flags a newer published week, and saves a week through the local app', async () => {
+  const card = extra => ({key:'aaii', name:'AAII sentiment', url:'https://www.aaii.com/sentimentsurvey', max_age:10, status:'ok', signal:'Bearish tilt', direction:-1, ...extra});
+  const html = cards => renderEarnings(null, {}, {macro:{cards}}).element('macro-cards').innerHTML;
+  const imported = html([card({value:-24.5, reading:'-24.5 pp', as_of:'2026-09-17', date_label:'reported', source_file:'sentiment (1).xls'})]);
   assert.match(imported, /As of 2026-09-17 · reported/);
   assert.match(imported, /From AAII's spreadsheet · sentiment \(1\).xls/);
-  assert.match(imported, /href="https:\/\/www.aaii.com\/files\/surveys\/sentiment.xls"[^>]*>download the AAII spreadsheet</);
-  assert.match(imported, /Current file saved 2026-09-18/);
-  const missing = renderEarnings(null, {}, {macro:{cards:[{key:'aaii', status:'unavailable', import_url:url,
-    import_note:'The app cannot read Downloads.'}]}}).element('macro-cards').innerHTML;
-  assert.match(missing, /download the AAII spreadsheet/);
-  assert.match(missing, /The app cannot read Downloads./);
+  assert.doesNotMatch(imported, /New week out/);  // on Friday Sep 18, the Sep 17 report is the latest published week
+  const lastWeek = html([card({value:-10, reading:'-10.0 pp', as_of:'2026-09-09', entered:true})]);
+  assert.match(lastWeek, /Entered from AAII's results page/);
+  assert.match(lastWeek, /data-aaii-edit>New week out Sep 17 · update</);
+  const missing = html([{key:'aaii', status:'unavailable'}]);
+  assert.match(missing, /data-aaii-edit>Add this week's results</);
+  assert.match(missing, /copy the new week's three percentages from <a href="https:\/\/www.aaii.com\/sentimentsurvey"/);
+
+  const posts = [];
+  const app = renderEarnings(null, {}, {macro:{cards:[{key:'aaii', status:'unavailable'}]}, fetch: async (url, init) => {
+    if (url === '/api/status') return {json: async () => ({token:'t'})};
+    posts.push({url, init});
+    return {ok:true, json: async () => ({status:'ok', value:-24.5, reading:'-24.5 pp', signal:'Bearish tilt', direction:-1,
+      as_of:'2026-09-16', date_label:'week ending', entered:true})};
+  }});
+  const cards = app.element('macro-cards');
+  cards.handlers.click({target:{closest: selector => selector === '[data-aaii-edit]' ? {} : null}});
+  assert.match(cards.innerHTML, /name="week_ending" value="2026-09-16"/);
+  const error = {textContent:''};
+  const form = {elements:{week_ending:{value:'2026-09-16'}, bullish:{value:'28.8'}, neutral:{value:'17.9'}, bearish:{value:'43.3'}},
+    querySelector: () => error};
+  const submit = () => cards.handlers.submit({target:{closest: () => form}, preventDefault() {}});
+  await submit();
+  assert.equal(error.textContent, 'These add up to 90.0%, not 100%.');
+  assert.equal(posts.length, 0);  // checked in the page before anything is sent
+  form.elements.bearish.value = '53.3';
+  await submit();
+  assert.equal(posts[0].url, '/api/aaii');
+  assert.equal(posts[0].init.headers['X-App-Token'], 't');
+  assert.deepEqual(JSON.parse(posts[0].init.body), {week_ending:'2026-09-16', bullish:28.8, neutral:17.9, bearish:53.3});
+  assert.match(cards.innerHTML, /-24.5 pp/);
+  assert.doesNotMatch(cards.innerHTML, /data-aaii-form|New week out|Add this week/);
+});
+
+test('macro chart draws the S&P 500 over the chosen series with range statistics and correlation', () => {
+  const days = [];
+  for (let t = Date.parse('2024-09-02T00:00:00Z'); t <= Date.parse('2026-09-17T00:00:00Z'); t += 864e5) {
+    const d = new Date(t);
+    if (d.getUTCDay() % 6) days.push(d.toISOString().slice(0, 10));
+  }
+  const spx = days.map((d, i) => [d, 5000 + i * 3 + (i % 7) * 20]);
+  const tracking = spx.map(([d, v]) => [d, v / 100]);  // moves with the index by construction
+  const history = {spx, series: {
+    aaii: {name: 'AAII bull–bear spread', frequency: 'weekly', source: 'AAII weekly survey', points: spx.filter((_, i) => i % 5 === 2).map(([d, v]) => [d, (v - 6000) / 50])},
+    vix: {name: 'VIX', frequency: 'daily', source: 'Cboe', points: tracking},
+    put_call: {name: 'Equity put/call, 5-day average', frequency: 'daily', source: 'Cboe', points: []},
+    fear_greed: {name: 'CNN Fear & Greed', frequency: 'daily', source: 'CNN', points: []},
+  }};
+  const app = renderEarnings(null, {}, {macro: {cards: [], history}, saved: {mseries: 'vix', mrange: '1Y'}});
+  const plot = () => app.element('macro-plot').innerHTML, table = () => app.element('macro-windows').innerHTML;
+  assert.match(app.element('macro-legend').innerHTML, /S&amp;P 500 [\d,.]+ · \+[\d.]+% over 1 year/);
+  assert.match(app.element('macro-legend').innerHTML, /VIX [\d.]+ · Sep 17/);
+  assert.match(plot(), /class="line-spx" d="M/);
+  assert.match(plot(), /class="line-ind" d="M/);
+  assert.match(plot(), /class="ref"/);  // VIX reference line at 20
+  assert.match(plot(), /VIX<tspan class="ref-label"> · line at 20<\/tspan>/);
+  assert.equal((table().match(/<tr/g) || []).length, 7);  // header plus six ranges
+  assert.match(table(), /<tr class="current"><th scope="row">1 year<\/th>/);
+  assert.match(table(), /\+(0\.9\d|1\.00) · moves with <span class="sub">n=/);
+  assert.match(app.element('macro-chart-note').textContent, /VIX · Cboe · since Sep 2, 2024/);
+  app.click('macro-range-seg', 'mrange', '1M');
+  assert.match(table(), /<tr class="current"><th scope="row">1 month<\/th>/);
+  assert.equal(app.storage['ivl-view'].mrange, '1M');
+  app.click('macro-series-seg', 'mseries', 'aaii');
+  assert.match(plot(), /class="dot-ind" cx=/);  // weekly points get markers in short ranges
+  app.click('macro-series-seg', 'mseries', 'put_call');
+  assert.match(plot(), /No Equity put\/call, 5-day average data in this range/);
+  const empty = renderEarnings(null, {}, {macro: {cards: []}});
+  assert.match(empty.element('macro-plot').innerHTML, /S&amp;P 500 history appears after the next data refresh/);
 });
 
 test('macro excludes stale data and retains source observation dates', () => {

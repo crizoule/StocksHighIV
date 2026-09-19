@@ -187,6 +187,25 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request('POST', '/api/settings', '[]', good)[0], 400)
         self.assertEqual(self.request('POST', '/api/settings', '{"mode":"auto","time":"99:00"}', good)[0], 400)
 
+    def test_aaii_week_needs_local_authorization_is_validated_and_shows_on_the_saved_report(self):
+        good = {'Origin': self.origin, 'X-App-Token': self.app.token}
+        week = json.dumps({'week_ending': '2026-09-16', 'bullish': 28.8, 'neutral': 17.9, 'bearish': 53.3})
+        self.assertEqual(self.request('POST', '/api/aaii', week)[0], 403)
+        with patch.object(self.app, 'eastern_now', return_value=datetime(2026, 9, 19, 9, 0)):
+            status, body = self.request('POST', '/api/aaii', json.dumps({**json.loads(week), 'bearish': 43.3}), good)
+            self.assertEqual((status, json.loads(body)['error']), (400, 'Bullish, neutral and bearish add up to 90%, not 100%.'))
+            status, body = self.request('POST', '/api/aaii', week, good)
+        self.assertEqual((status, json.loads(body)['reading']), (200, '-24.5 pp'))
+        templates = Path(__file__).resolve().parents[1]/'templates'
+        for name in ('dashboard.html', 'dashboard.js', 'dashboard.css', 'favicon.svg'):
+            shutil.copy2(templates/name, self.app.root/'templates'/name)
+        (self.app.root/'output').mkdir()
+        payload = {'rows': [], 'macro_sentiment': {'cards': [{'key': 'aaii', 'name': 'AAII sentiment', 'status': 'unavailable'}]}}
+        (self.app.root/'output/dashboard.html').write_text(f'<html><body><script id="payload" type="application/json">{json.dumps(payload)}</script></body></html>')
+        status, body = self.request('GET', '/dashboard.html')
+        self.assertEqual(status, 200)
+        self.assertIn(b'"reading": "-24.5 pp"', body)
+
     def test_saved_report_gets_current_controls_and_cached_webp_without_market_refresh(self):
         templates = Path(__file__).resolve().parents[1]/'templates'
         for name in ('dashboard.html', 'dashboard.js', 'dashboard.css', 'favicon.svg'):

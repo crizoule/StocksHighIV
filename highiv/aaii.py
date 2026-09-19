@@ -1,23 +1,26 @@
-"""AAII sentiment readings, from AAII's page or from the spreadsheet a user saved from a browser.
+"""AAII sentiment readings: AAII's page, bundled history, weeks entered by hand, or a spreadsheet in data/imports.
 
-AAII blocks automated requests, so the app never downloads the spreadsheet. The user saves it
-(sentiment.xls, sentiment (1).xls, …) into Downloads or data/imports; each refresh reads the newest
-one. The last good import is kept, so deleting the file later does not erase the reading.
+AAII blocks automated requests, so the app never downloads the survey. aaii_history.csv bundles AAII's
+weekly results (personal use); each Thursday the user copies the new week's three percentages from
+AAII's results page into the dashboard. Standard library only at import time: the local launcher runs
+on system Python, and only spreadsheet reading needs xlrd or openpyxl.
 """
 from __future__ import annotations
 
 import csv
 import io
+import json
+import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-
-import openpyxl
-import xlrd
 
 from . import config
 
-DOWNLOAD_URL = "https://www.aaii.com/files/surveys/sentiment.xls"
+RESULTS_URL = "https://www.aaii.com/sentimentsurvey"
+HISTORY_FILE = Path(__file__).with_name("aaii_history.csv")
+LONG_RUN = (37.5, 31.0, 31.5)   # AAII's published long-run averages (bullish, neutral, bearish), from its results page
+MAX_ENTRY_AGE_DAYS = 70
 FILE_NAME = re.compile(r"sentiment.*\.(xls|xlsx|csv)", re.I)
 MAX_BYTES = 20_000_000
 MAX_FILES = 5
@@ -32,8 +35,122 @@ def summary(when, bull, neutral, bear, label="Week ending"):
                 detail=f"{label} {when}: {bull:g}% bullish / {neutral:g}% neutral / {bear:g}% bearish. Bull–bear spread; weekly six-month outlook survey. ±10 pp defines the app’s tilt; extremes can be contrarian.")
 
 
+def week_of(item):
+    """The survey week's closing Wednesday; spreadsheet rows are dated the Thursday they were reported."""
+    try:
+        when = date.fromisoformat(str(item["as_of"])[:10])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return when - timedelta(days=1) if item.get("date_label") == "reported" else when
+
+
+def newest(*items):
+    """The reading for the latest survey week; earlier arguments win a tie."""
+    candidates = [(week_of(item), -rank, item) for rank, item in enumerate(items)
+                  if item and item.get("status") in ("ok", "cached") and week_of(item)]
+    return max(candidates, key=lambda c: c[:2])[2] if candidates else None
+
+
+def bundled():
+    """AAII's weekly results shipped with the app, keyed by reported (Thursday) date, in percent."""
+    weeks = {}
+    for line in HISTORY_FILE.read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith(("#", "reported")):
+            day, *values = line.split(",")
+            weeks[date.fromisoformat(day)] = [float(v) for v in values]
+    return weeks
+
+
+def bundled_reading():
+    weeks = bundled()
+    when = max(weeks)
+    bull, neutral, bear = (round(v, 1) for v in weeks[when])
+    item = summary(when, bull, neutral, bear, "Reported")
+    item["detail"] += (f" From AAII's history bundled with the app ({len(weeks)} weeks since {min(weeks)}). "
+                       f"AAII's long-run averages: {LONG_RUN[0]:g}% bullish / {LONG_RUN[1]:g}% neutral / {LONG_RUN[2]:g}% bearish.")
+    return {**item, "status": "ok", "source": "AAII history bundled with the app", "date_label": "reported"}
+
+
+def spread_series(data_dir, *readings):
+    """Weekly bull–bear spread by survey week (Wednesday): bundled history, then any newer readings, then entries."""
+    weeks = {when - timedelta(days=1): round(v[0] - v[2], 2) for when, v in bundled().items()}
+    for item in readings:
+        week = week_of(item or {})
+        if week and item.get("status") in ("ok", "cached") and isinstance(item.get("value"), (int, float)):
+            weeks[week] = item["value"]
+    weeks.update({when: round(v[0] - v[2], 2) for when, v in entered_weeks(data_dir).items()})
+    return [[when.isoformat(), weeks[when]] for when in sorted(weeks)]
+
+
+def entries_path(data_dir):
+    return Path(data_dir) / "sentiment" / "aaii-manual.json"
+
+
+def entered_weeks(data_dir):
+    try:
+        weeks = json.loads(entries_path(data_dir).read_text(encoding="utf-8"))["weeks"]
+        return {date.fromisoformat(k): [float(v) for v in values] for k, values in weeks.items() if len(values) == 3}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return {}
+
+
+def entered(data_dir):
+    """The latest week the user entered, as a card reading, or None."""
+    weeks = entered_weeks(data_dir)
+    if not weeks:
+        return None
+    when = max(weeks)
+    item = summary(when, *weeks[when])
+    item["detail"] += (f" Entered from AAII's weekly results. AAII's long-run averages: {LONG_RUN[0]:g}% bullish / "
+                       f"{LONG_RUN[1]:g}% neutral / {LONG_RUN[2]:g}% bearish.")
+    return {**item, "status": "ok", "source": "Entered from AAII's results page", "date_label": "week ending", "entered": True}
+
+
+def save_week(data_dir, week_ending, bullish, neutral, bearish, today):
+    """Validate and store one week's percentages; returns the updated card reading."""
+    try:
+        when = date.fromisoformat(str(week_ending))
+    except ValueError:
+        raise ValueError("Enter the week-ending date shown on AAII's page.") from None
+    if when > today or (today - when).days > MAX_ENTRY_AGE_DAYS:
+        raise ValueError("The week must end today or earlier, within the last 10 weeks.")
+    values = []
+    for value in (bullish, neutral, bearish):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 100:
+            raise ValueError("Enter each percentage between 0 and 100.")
+        values.append(round(float(value), 1))
+    if abs(sum(values) - 100) > 0.5:
+        raise ValueError(f"Bullish, neutral and bearish add up to {sum(values):g}%, not 100%.")
+    weeks = entered_weeks(data_dir)
+    weeks[when] = values
+    path = entries_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"weeks": {d.isoformat(): weeks[d] for d in sorted(weeks)}}), encoding="utf-8")
+    os.replace(temporary, path)
+    return entered(data_dir)
+
+
+def apply_entered(payload, data_dir):
+    """Show hand-entered weeks on a saved report (card and chart) without waiting for the next refresh."""
+    macro = payload.get("macro_sentiment") or {}
+    reading = entered(data_dir)
+    if not reading:
+        return payload
+    chart = ((macro.get("history") or {}).get("series") or {}).get("aaii")
+    if chart and isinstance(chart.get("points"), list):
+        points = {day: value for day, value in chart["points"]}
+        points.update({when.isoformat(): round(v[0] - v[2], 2) for when, v in entered_weeks(data_dir).items()})
+        chart["points"] = [[day, points[day]] for day in sorted(points)]
+    for index, card in enumerate(macro.get("cards") or []):
+        if card.get("key") == "aaii" and newest(card, reading) is reading:
+            keep = {k: card[k] for k in ("key", "name", "url", "max_age") if k in card}
+            macro["cards"][index] = {**reading, **keep}
+    return payload
+
+
 def import_folders():
-    return (config.DATA_DIR / "imports", Path.home() / "Downloads")
+    return (config.DATA_DIR / "imports",)
 
 
 def find_files(folders):
@@ -51,6 +168,7 @@ def find_files(folders):
 
 
 def _xls_value(book, cell):
+    import xlrd
     if cell.ctype == xlrd.XL_CELL_DATE:
         try:
             return xlrd.xldate.xldate_as_datetime(cell.value, book.datemode).date()
@@ -62,10 +180,12 @@ def _xls_value(book, cell):
 def read_sheets(data):
     """Rows of every sheet, as plain values, from .xls, .xlsx or CSV bytes."""
     if data.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+        import xlrd
         book = xlrd.open_workbook(file_contents=data)
         return [[[_xls_value(book, sheet.cell(r, c)) for c in range(sheet.ncols)] for r in range(sheet.nrows)]
                 for sheet in book.sheets()]
     if data.startswith(b"PK\x03\x04"):
+        import openpyxl
         book = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         return [[list(row) for row in sheet.iter_rows(values_only=True)] for sheet in book.worksheets]
     text = data.decode("utf-8-sig", errors="replace")

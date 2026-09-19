@@ -97,5 +97,72 @@ class ImportTests(unittest.TestCase):
             self.assertIn("cannot read", notes[0])
 
 
+class EnteredWeekTests(unittest.TestCase):
+    def test_saved_week_becomes_the_reading_with_published_long_run_averages(self):
+        with TemporaryDirectory() as data:
+            reading = aaii.save_week(data, "2026-09-16", 28.8, 17.9, 53.3, date(2026, 9, 19))
+            self.assertEqual((reading["as_of"], reading["value"], reading["signal"]), ("2026-09-16", -24.5, "Bearish tilt"))
+            self.assertEqual((reading["date_label"], reading["entered"], reading["status"]), ("week ending", True, "ok"))
+            self.assertIn("long-run averages: 37.5% bullish / 31% neutral / 31.5% bearish", reading["detail"])
+            aaii.save_week(data, "2026-09-09", 40, 30, 30, date(2026, 9, 19))  # an older correction never hides the latest week
+            self.assertEqual(aaii.entered(data)["as_of"], "2026-09-16")
+            self.assertEqual(sorted(aaii.entered_weeks(data)), [date(2026, 9, 9), date(2026, 9, 16)])
+
+    def test_invalid_weeks_are_rejected_with_a_reason(self):
+        with TemporaryDirectory() as data:
+            for args, reason in [(("2026-09-23", 30, 30, 40), "today or earlier"), (("2026-06-01", 30, 30, 40), "last 10 weeks"),
+                                 (("09/16/2026", 30, 30, 40), "week-ending date"), (("2026-09-16", 30, 30, 30), "add up to 90%"),
+                                 (("2026-09-16", 130, -10, -20), "between 0 and 100"), (("2026-09-16", True, 50, 49), "between 0 and 100"),
+                                 (("2026-09-16", "28.8", 17.9, 53.3), "between 0 and 100")]:
+                with self.assertRaisesRegex(ValueError, reason):
+                    aaii.save_week(data, *args, date(2026, 9, 19))
+            self.assertIsNone(aaii.entered(data))
+
+    def test_latest_survey_week_wins_across_page_entry_and_spreadsheet(self):
+        spreadsheet = {"status": "ok", "as_of": "2026-09-17", "date_label": "reported", "value": 1}  # reported Thursday
+        entered = {"status": "ok", "as_of": "2026-09-16", "date_label": "week ending", "value": 2}  # the same survey week
+        later = {**entered, "as_of": "2026-09-23", "value": 3}
+        self.assertEqual(aaii.week_of(spreadsheet), date(2026, 9, 16))
+        self.assertIs(aaii.newest(entered, spreadsheet), entered)  # same week: the earlier argument wins
+        self.assertIs(aaii.newest(spreadsheet, later), later)
+        self.assertIs(aaii.newest({"status": "unavailable", "as_of": "2026-09-30"}, spreadsheet), spreadsheet)
+        self.assertIsNone(aaii.newest({"status": "unavailable"}, None))
+
+    def test_saved_report_shows_a_newer_entered_week_but_keeps_its_card_identity(self):
+        with TemporaryDirectory() as data:
+            aaii.save_week(data, "2026-09-16", 28.8, 17.9, 53.3, date(2026, 9, 19))
+            card = {"key": "aaii", "name": "AAII sentiment", "url": "https://example.com", "max_age": 10,
+                    "status": "unavailable", "error": "Provider blocked"}
+            payload = aaii.apply_entered({"macro_sentiment": {"cards": [card]}}, data)
+            shown = payload["macro_sentiment"]["cards"][0]
+            self.assertEqual((shown["name"], shown["url"], shown["reading"]), ("AAII sentiment", "https://example.com", "-24.5 pp"))
+            self.assertNotIn("error", shown)
+            newer = {**card, "status": "ok", "as_of": "2026-09-23", "value": 5.0}
+            self.assertIs(aaii.apply_entered({"macro_sentiment": {"cards": [newer]}}, data)["macro_sentiment"]["cards"][0], newer)
+            self.assertEqual(aaii.apply_entered({"rows": []}, data), {"rows": []})
+
+    def test_bundled_history_is_weekly_since_1987_and_its_latest_week_is_a_reading(self):
+        weeks = aaii.bundled()
+        self.assertEqual(min(weeks), date(1987, 7, 24))
+        self.assertGreater(len(weeks), 2000)
+        self.assertTrue(all(abs(sum(v) - 100) <= 0.6 for v in weeks.values()))
+        reading = aaii.bundled_reading()
+        self.assertEqual((reading["as_of"], reading["date_label"], reading["status"]), (max(weeks).isoformat(), "reported", "ok"))
+
+    def test_chart_series_is_by_survey_week_with_entries_and_newer_readings_on_top(self):
+        with TemporaryDirectory() as data, patch.object(aaii, "bundled", return_value={date(2026, 9, 10): [40.0, 30.0, 30.0]}):
+            aaii.save_week(data, "2026-09-16", 28.8, 17.9, 53.3, date(2026, 9, 19))
+            live = {"status": "ok", "as_of": "2026-09-23", "value": 5.0}
+            self.assertEqual(aaii.spread_series(data, live, {"status": "unavailable"}, None),
+                             [["2026-09-09", 10.0], ["2026-09-16", -24.5], ["2026-09-23", 5.0]])
+            payload = {"macro_sentiment": {"cards": [], "history": {"series": {"aaii": {"points": [["2026-09-09", 10.0]]}}}}}
+            aaii.apply_entered(payload, data)
+            self.assertEqual(payload["macro_sentiment"]["history"]["series"]["aaii"]["points"],
+                             [["2026-09-09", 10.0], ["2026-09-16", -24.5]])
+
+    def test_spreadsheets_are_read_only_from_the_imports_folder(self):
+        self.assertEqual([p.name for p in aaii.import_folders()], ["imports"])
+
+
 if __name__ == "__main__":
     unittest.main()
