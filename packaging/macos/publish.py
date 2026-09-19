@@ -41,11 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Adds a Fear & Greed replica built from public data. While CNN's feed works, the CNN card shows the replica as a cross-check. When the feed is blocked or stale, the card shows the replica instead, labelled as not CNN's reading, with all seven components. It uses CNN's own scoring method. Against CNN's published history, it averaged about 3 points apart and gave the same rating on about 4 of 5 days. The first few refreshes download Cboe put/call history, up to 3 minutes each. Until that finishes, the replica runs on six of its seven components.
+    notes = '''Adds an S&P 500 and sentiment chart to the macro panel. It shows the S&P 500 above one sentiment series on the same dates: AAII's bull–bear spread, VIX, the equity put/call ratio, or Fear & Greed. Choose 1 month to 10 years. Hover shows both values for a date. A table gives each range's S&P 500 change, the series' average and range, and how closely their changes move together.
 
-Adds a manual AAII import. AAII blocks automated downloads, so download AAII's weekly spreadsheet in your browser and save it to Downloads; the AAII card links to it. The next refresh reads it. On a Mac, the first read of Downloads may ask for permission.
+AAII's weekly history since 1987 is now included. Each Thursday, when AAII publishes a new week, the AAII card shows a small note: click it to enter the three percentages from AAII's results page. The app no longer reads your Downloads folder.
 
-Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. The first launch after updating installs one additional Python package.
+Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to fill the chart.
 
 For a new installation, download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Requires Python 3.11+. The Mac app is signed and Apple-notarized. Windows supports Windows 10/11 x64; the executable is not Authenticode-signed.'''
     subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), str(windows_archive), str(windows_feed), '--repo', REPO,
