@@ -593,6 +593,12 @@ th.col-stock { z-index: 2; }
 .macro-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .macro-heading .eyebrow { margin: 0 0 6px; }
 .macro-heading h2 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
+.macro-toggle { display: inline-flex; align-items: center; gap: 10px; border: 0; padding: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; }
+.macro-toggle .chevron { width: 0; height: 0; border-block: 6px solid transparent; border-left: 8px solid var(--ink-3); transition: transform .15s; }
+.macro-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+.macro-toggle:hover .chevron { border-left-color: var(--accent); }
+.macro-oneline { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 0 0; color: var(--ink-2); font: 500 13px var(--font-mono); }
+.macro-oneline b { margin-right: 6px; color: var(--ink); font: 650 12px var(--font-ui); }
 .macro-note, .sentiment-meta { color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 .macro-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
 .macro-card { padding: 18px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface-2); min-width: 0; }
@@ -616,7 +622,7 @@ th.col-stock { z-index: 2; }
 .sentiment-evidence span { display: block; color: var(--ink-3); }
 .macro-chart { margin: 22px 0 0; padding: 18px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface-2); min-width: 0; }
 .macro-chart-head { display: grid; gap: 10px; }  /* controls keep their own row, whatever the note's length */
-.macro-chart-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.macro-chart-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .macro-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 6px; font: 500 12px var(--font-mono); color: var(--ink-2); }
 .macro-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .macro-legend .key { display: inline-block; width: 16px; border-top: 2px solid; border-radius: 1px; }

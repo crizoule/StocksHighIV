@@ -19,7 +19,7 @@
   const FRAME_WINDOW = { "1H": "1 wk", "4H": "1 mo", "1D": "6 mo", "1W": "2 yr", "1M": "5 yr" };
   const $ = (id) => document.getElementById(id);
 
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y" };
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, macroOpen: true };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
@@ -27,11 +27,12 @@
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
     if (saved && ["aaii", "vix", "put_call", "fear_greed"].includes(saved.mseries)) state.mseries = saved.mseries;
-    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y"].includes(saved.mrange)) state.mrange = saved.mrange;
+    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
+    if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; }
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
-      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange }));
+      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog, macroOpen: state.macroOpen }));
     } catch (err) { /* ignore */ }
   };
 
@@ -143,15 +144,25 @@
   };
   const replicaParts = parts => (parts || []).length ? `<ul class="replica-parts">${parts.map(p =>
     `<li>${esc(p.name)} · ${isNum(p.score) ? `${nf1.format(p.score)} ${esc(p.rating || "")}` : "Unavailable"}<span>${esc(isNum(p.score) ? p.reading : p.detail || "No fresh input")}</span></li>`).join("")}</ul>` : "";
+  const renamed = (name) => name === "CNN Fear & Greed" ? "Fear & Greed" : name;  // reports saved before 1.6.0
   const renderMacro = () => {
     const defaults = [
       {key:"vix", name:"VIX", url:"https://www.cboe.com/tradable-products/vix/"},
       {key:"put_call", name:"Put/call ratios", url:"https://www.cboe.com/us/options/market_statistics/daily/"},
       {key:"aaii", name:"AAII sentiment", url:"https://www.aaii.com/sentimentsurvey"},
-      {key:"cnn", name:"CNN Fear & Greed", url:"https://www.cnn.com/markets/fear-and-greed"},
+      {key:"cnn", name:"Fear & Greed", url:"https://www.cnn.com/markets/fear-and-greed"},
     ];
     const cards = defaults.map(d => ({...d, ...(DATA.macro_sentiment?.cards || []).find(c => c.key === d.key)}))
-      .map(c => ({...c, usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
+      .map(c => ({...c, name: renamed(c.name), usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
+    // Collapsed, the panel keeps one line with each reading; expanded, the cards and chart.
+    $("macro-toggle").setAttribute("aria-expanded", String(state.macroOpen));
+    $("macro-body").hidden = !state.macroOpen;
+    $("macro-oneline").hidden = state.macroOpen;
+    $("macro-oneline").innerHTML = cards.map(c => {
+      const label = {vix: "VIX", put_call: "Put/call", aaii: "AAII", cnn: c.replica_of ? "Fear & Greed (replica)" : "Fear & Greed"}[c.key];
+      const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
+      return `<span><b>${esc(label)}</b> ${c.usable ? `${esc(c.reading)} · ${esc(c.signal)}` : stale ? "stale" : "—"}</span>`;
+    }).join("");
     const available = cards.filter(c => c.usable);
     const positive = available.filter(c => c.direction > 0).length, negative = available.filter(c => c.direction < 0).length;
     $("macro-summary").textContent = available.length < 3 ? "Limited coverage" : positive && negative ? "Mixed signals" : positive >= 2 ? "Risk appetite leaning positive" : negative >= 2 ? "Cautious mood" : "Mixed signals";
@@ -183,14 +194,19 @@
 
   /* ---------- macro chart: S&P 500 above, one sentiment series below, on one time axis ---------- */
   // Two panes rather than two y-scales on one plot: rescaling either axis could make any two lines look related.
-  const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0]];
+  const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0], ["MAX", "Since 1987"]];
+  const MACRO_EARLIEST = Date.UTC(1987, 6, 1);  // AAII's survey begins in July 1987
+  const MACRO_GAP = 21 * 864e5;  // longer than any weekly step: a real gap in a series
   const MACRO_SERIES = {
     aaii: { short: "AAII spread", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))} pp`, ref: 0, refLabel: "line at 0: bulls = bears" },
     vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
   };
-  const monthsBack = (t, years, months) => { const d = new Date(t); d.setUTCMonth(d.getUTCMonth() - months - 12 * years); return d.getTime(); };
+  const monthsBack = (t, years, months) => {
+    if (years === undefined) return MACRO_EARLIEST;
+    const d = new Date(t); d.setUTCMonth(d.getUTCMonth() - months - 12 * years); return d.getTime();
+  };
   let macroCache = null;
   const macroData = () => {
     const history = DATA.macro_sentiment?.history;
@@ -220,13 +236,22 @@
     // Correlation of changes, at the indicator's own frequency: its change vs the S&P 500's return between the same dates.
     const pairs = ind.map((p) => [p.v, lastAtOrBefore(spx, p.t)]).filter(([, c]) => c);
     const dv = [], dr = [];
-    for (let i = 1; i < pairs.length; i++) { dv.push(pairs[i][0] - pairs[i - 1][0]); dr.push(pairs[i][1].v / pairs[i - 1][1].v - 1); }
+    for (let i = 1; i < pairs.length; i++) {
+      if (ind[i].t - ind[i - 1].t > MACRO_GAP) continue;  // a change across a data gap is not a weekly or daily move
+      dv.push(pairs[i][0] - pairs[i - 1][0]); dr.push(pairs[i][1].v / pairs[i - 1][1].v - 1);
+    }
     return {
       px, ind, ret: px.length > 1 ? (px[px.length - 1].v / px[0].v - 1) * 100 : null,
       avg: values.length ? values.reduce((s, v) => s + v, 0) / values.length : null,
       lo: values.length ? Math.min(...values) : null, hi: values.length ? Math.max(...values) : null,
       r: dv.length >= 8 ? pearson(dv, dr) : null, n: dv.length,
     };
+  };
+  const logTicks = (lo, hi) => {  // 1, 2 and 5 × 10ⁿ; powers of ten alone when that would crowd; null when a range is too narrow
+    const out = [];
+    for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) for (const k of [1, 2, 5]) { const v = k * 10 ** e; if (v >= lo && v <= hi) out.push({ v, k }); }
+    const powers = out.filter((t) => t.k === 1).map((t) => t.v);
+    return out.length > 7 && powers.length >= 2 ? powers : out.length >= 3 ? out.map((t) => t.v) : null;
   };
   const niceTick = (raw) => { const mag = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw); };
   const ticks = (lo, hi, count) => {
@@ -249,9 +274,10 @@
   let macroHover = null;
   const renderMacroChart = () => {
     document.querySelectorAll("#macro-series-seg button").forEach((b) => { const on = b.dataset.mseries === state.mseries; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
+    $("macro-log").checked = state.mlog;
     document.querySelectorAll("#macro-range-seg button").forEach((b) => { const on = b.dataset.mrange === state.mrange; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
     const data = macroData(), meta = MACRO_SERIES[state.mseries], series = data.series[state.mseries];
-    const name = series.name || meta.short;
+    const name = renamed(series.name) || meta.short;
     macroHover = null;
     if (data.spx.length < 2) {
       $("macro-legend").innerHTML = "";
@@ -263,28 +289,31 @@
     }
     const end = data.spx[data.spx.length - 1].t;
     const [, label, years, months] = MACRO_RANGES.find(([key]) => key === state.mrange);
+    const phrase = years === undefined ? "since 1987" : `over ${label}`;
     const start = monthsBack(end, years, months);
     const w = macroWindow(data.spx, series.points, start, end);
     const first = series.points[0];
     $("macro-chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
     const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
     $("macro-legend").innerHTML =
-      `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% over ${label}` : ""}</span>` +
+      `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
       `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>`;
     const W = Math.max(240, $("macro-plot").clientWidth || 960);
     const m = { left: 64, right: 14 }, top = 22, h1 = 186, gap = 34, h2 = 104, axis = 22, H = top + h1 + gap + h2 + axis;  // pane labels sit above each pane
     const x = (t) => m.left + ((t - start) / Math.max(end - start, 1)) * (W - m.left - m.right);
-    const pane = (points, y0, height, ref) => {
-      const values = points.map((p) => p.v).concat(isNum(ref) ? [ref] : []);
+    const pane = (points, y0, height, ref, log = false) => {  // log: equal percentage moves take equal height
+      const f = log ? Math.log10 : (v) => v, inv = (v) => (log ? 10 ** v : v);
+      const values = points.map((p) => f(p.v)).concat(isNum(ref) ? [f(ref)] : []);
       let lo = Math.min(...values), hi = Math.max(...values);
       if (lo === hi) { lo -= 1; hi += 1; }
       const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-      const scale = ticks(lo, hi, height > 150 ? 4 : 3);
-      return { y: (v) => y0 + (1 - (v - lo) / (hi - lo)) * height, step: scale.step, ticks: scale.values.filter((v) => v >= lo && v <= hi) };
+      const decades = log ? logTicks(inv(lo), inv(hi)) : null;
+      const scale = decades ? { values: decades, step: 1 } : ticks(inv(lo), inv(hi), height > 150 ? 4 : 3);
+      return { y: (v) => y0 + (1 - (f(v) - lo) / (hi - lo)) * height, step: scale.step, ticks: scale.values.filter((v) => f(v) >= lo && f(v) <= hi) };
     };
-    const path = (points, y) => points.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    const path = (points, y) => points.map((p, i) => `${i && p.t - points[i - 1].t <= MACRO_GAP ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
     const top2 = top + h1 + gap;
-    const P = pane(w.px, top, h1), I = w.ind.length ? pane(w.ind, top2, h2, meta.ref) : null;
+    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind, top2, h2, meta.ref) : null;
     const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
       `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
     // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
@@ -292,7 +321,7 @@
     const span = end - start, days = span / 864e5, xTicks = [];
     if (days <= 120) for (let i = 0; i <= 4; i++) xTicks.push(start + (span * i) / 4);
     else {
-      const every = days > 6.5 * 365 ? 24 : days > 400 ? 12 : days > 200 ? 3 : 2, first = new Date(start);
+      const every = days > 20 * 365 ? 60 : days > 6.5 * 365 ? 24 : days > 400 ? 12 : days > 200 ? 3 : 2, first = new Date(start);
       for (let d = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1)); d.getTime() <= end; d.setUTCMonth(d.getUTCMonth() + 1)) {
         if ((d.getUTCFullYear() * 12 + d.getUTCMonth()) % every === 0) xTicks.push(d.getTime());
       }
@@ -304,9 +333,9 @@
     const markers = I && w.ind.length <= 60 && series.frequency === "weekly"
       ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
     $("macro-plot").innerHTML =
-      `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 over ${label} above ${esc(name)} on the same dates">` +
+      `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 ${phrase} above ${esc(name)} on the same dates">` +
       grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y)}"/>` +
-      `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500</text>` +
+      `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${state.mlog ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
       (I ? grid(I, m.left - 8) +
         (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
         `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
@@ -317,8 +346,9 @@
       `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
     macroHover = { x, P, I, w, start, end, name, meta, W, m };
     const unit = series.frequency === "weekly" ? "weekly" : "daily";
+    const weeklyNote = unit === "daily" ? " Points older than 10 years are weekly, so long ranges mix weekly and daily changes." : "";
     $("macro-windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th><th scope="col">${esc(meta.short)} average</th>` +
-      `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of ${unit} changes</th></tr></thead><tbody>` +
+      `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of changes</th></tr></thead><tbody>` +
       MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
         const s = macroWindow(data.spx, series.points, monthsBack(end, y, mo), end);
         return `<tr${key === state.mrange ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
@@ -326,7 +356,7 @@
           `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
           `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
       }).join("") + "</tbody>";
-    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. It describes the past, not a forecast; needs 8 changes.`;
+    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.`;
   };
   const hoverMacro = (ev) => {
     const svg = ev.target.closest(".macro-svg");
@@ -1000,6 +1030,8 @@
   wireSeg("frame-seg", "frame", (v) => { state.frame = v; persist(); });
   wireSeg("macro-series-seg", "mseries", (v) => { state.mseries = v; persist(); }, "aria-checked", renderMacroChart);
   wireSeg("macro-range-seg", "mrange", (v) => { state.mrange = v; persist(); }, "aria-checked", renderMacroChart);
+  $("macro-log").addEventListener("change", (ev) => { state.mlog = ev.target.checked; persist(); renderMacroChart(); });
+  $("macro-toggle").addEventListener("click", () => { state.macroOpen = !state.macroOpen; persist(); renderMacro(); });
   $("macro-plot").addEventListener("pointermove", hoverMacro);
   $("macro-plot").addEventListener("pointerleave", leaveMacro);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });

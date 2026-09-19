@@ -34,9 +34,15 @@ MACRO = {
     "vix": ("VIX", VIX_URL, 4),
     "put_call": ("Put/call ratios", PC_URL, 4),
     "aaii": ("AAII sentiment", AAII_URL, 10),
-    "cnn": ("CNN Fear & Greed", CNN_PAGE, 2),
+    "cnn": ("Fear & Greed", CNN_PAGE, 2),
 }
-HISTORY_DAYS = 3660               # the macro chart's longest range: 10 years
+HISTORY_DAYS = 3660               # the chart keeps daily points for 10 years, weekly points before that
+EARLIEST = date(1987, 7, 1)       # AAII's survey starts in July 1987, the chart's longest range
+PUT_CALL_ARCHIVES = (             # Cboe's discontinued daily files; the newer one wins where they overlap
+    "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypcarchive.csv",  # Oct 2003 – Jun 2012
+    "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypc.csv",         # Nov 2006 – Oct 2019
+)
+TTL_HOURS = {("history", "put_call_archive"): 24 * 30}  # Cboe no longer updates these files
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
@@ -118,9 +124,8 @@ def parse_vix(text, today):
         if when <= today:
             rows.append((when, number(item["CLOSE"], 0.01, 200)))
     when, value = max(rows)
-    since = when - timedelta(days=HISTORY_DAYS)
     return dict(as_of=when.isoformat(), value=value, reading=f"{value:.2f}",
-                history=[[d.isoformat(), v] for d, v in sorted(rows) if d >= since],
+                history=[[d.isoformat(), v] for d, v in thinned(sorted(rows), when - timedelta(days=HISTORY_DAYS)) if d >= EARLIEST],
                 signal="Calm" if value < 20 else "Elevated uncertainty" if value < 30 else "High stress",
                 direction=1 if value < 20 else 0 if value < 30 else -1,
                 detail="Cboe daily close; expected 30-day S&P 500 volatility, not direction. Heuristic: <20 calm, 20–30 elevated, ≥30 stressed.")
@@ -185,7 +190,7 @@ def parse_cnn(text, today):
                 detail="CNN’s seven-component Fear & Greed index. Includes volatility and options inputs already shown here, so it is not an independent confirmation. Public website feed may be unavailable; no official API guarantee.")
 
 
-def request_text(client, url, **kwargs):
+def request_text(client, url, errors="strict", **kwargs):
     # Bounded requests, no anti-bot workarounds and no leaking API keys in failure messages.
     with client.stream("GET", url, **kwargs) as response:
         if response.status_code != 200:
@@ -195,7 +200,7 @@ def request_text(client, url, **kwargs):
             data.extend(chunk)
             if len(data) > 3_000_000:
                 raise ValueError("Provider response too large")
-    return data.decode("utf-8")
+    return data.decode("utf-8", errors)
 
 
 def cached_read(key, fetch, now, ttl_hours=6):
@@ -334,28 +339,71 @@ def fetch_cnn(client, today):
 
 def fetch_spx_history(now):
     local = now.astimezone(context.MARKET_TZ)
-    frame = fear_greed.completed(yf.download("^GSPC", period="10y", interval="1d", auto_adjust=False, progress=False,
+    frame = fear_greed.completed(yf.download("^GSPC", start=EARLIEST.isoformat(), interval="1d", auto_adjust=False, progress=False,
                                              multi_level_index=False, timeout=20), local.date(), local.hour)
-    closes = frame["Close"].dropna()
-    if len(closes) < 250:
+    rows = [(d.date(), round(number(v, 1), 2)) for d, v in frame["Close"].dropna().items()]
+    if len(rows) < 250:
         raise ValueError("Insufficient S&P 500 history")
-    return {"points": [[d.date().isoformat(), round(number(v, 1), 2)] for d, v in closes.items()]}
+    return {"points": [[d.isoformat(), v] for d, v in thinned(rows, rows[-1][0] - timedelta(days=HISTORY_DAYS))]}
 
 
-def put_call_series():
-    """Five-session average of Cboe's daily equity put/call ratio, from the stored history, oldest first."""
+def thinned(rows, recent_from):
+    """(date, value) pairs, oldest first: every point from `recent_from`, before it only each week's last point."""
+    out, week = [], None
+    for day, value in rows:
+        key = day + timedelta(days=(2 - day.weekday()) % 7)  # weeks end on Wednesday, like AAII's survey
+        if day < recent_from and out and key == week:
+            out[-1] = (day, value)
+        else:
+            out.append((day, value))
+        week = key
+    return out
+
+
+def parse_put_call_archive(text):
+    """Daily equity put/call ratios from one of Cboe's discontinued CSV files (disclaimer and headings first)."""
+    daily = {}
+    for row in csv.reader(io.StringIO(text)):
+        try:
+            day = datetime.strptime(row[0].strip(), "%m/%d/%Y").date()
+            calls, puts = float(row[1]), float(row[2])
+        except (IndexError, ValueError):
+            continue
+        if calls > 0 and puts >= 0:
+            daily[day] = puts / calls
+    if len(daily) < 100:
+        raise ValueError("Unrecognized Cboe archive")
+    return daily
+
+
+def fetch_put_call_archive(client):
+    daily = {}
+    for url in PUT_CALL_ARCHIVES:
+        daily.update(parse_put_call_archive(request_text(client, url, errors="replace")))  # the disclaimers carry stray bytes
+    return {"daily": [[d.isoformat(), round(v, 4)] for d, v in sorted(daily.items())]}
+
+
+def put_call_series(archive=()):
+    """Five-session average of Cboe's daily equity put/call ratio: the 2003–2019 archive, then the stored history.
+
+    Averages never span a gap between the two; points older than 10 years are thinned to one per week.
+    """
+    daily = {date.fromisoformat(day): ratio for day, ratio in archive}
     try:
         history = json.loads((config.DATA_DIR / "sentiment" / "put_call_history.json").read_text(encoding="utf-8"))["sessions"]
     except (OSError, ValueError, TypeError, KeyError):
-        return []
-    daily = []
-    for day in sorted(history):
+        history = {}
+    for day, volumes in history.items():
         try:
-            calls, puts = history[day]["equity"]
-            daily.append((day, puts / calls))
+            calls, puts = volumes["equity"]
+            daily[date.fromisoformat(day)] = puts / calls
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             continue
-    return [[daily[i][0], round(sum(v for _, v in daily[i - 4:i + 1]) / 5, 3)] for i in range(4, len(daily))]
+    days = sorted(daily)
+    averaged = [(days[i], sum(daily[d] for d in days[i - 4:i + 1]) / 5) for i in range(4, len(days)) if (days[i] - days[i - 4]).days <= 10]
+    if not averaged:
+        return []
+    return [[d.isoformat(), round(v, 3)] for d, v in thinned(averaged, averaged[-1][0] - timedelta(days=HISTORY_DAYS))]
 
 
 def check_fear_greed(now=None, years=3):
@@ -426,6 +474,7 @@ def collect(rows, *, now=None):
             jobs[("macro", key)] = macro_fetch
         jobs[("macro", "fear_greed")] = lambda: fetch_fear_greed(client, now)
         jobs[("history", "spx")] = lambda: fetch_spx_history(now)
+        jobs[("history", "put_call_archive")] = lambda: fetch_put_call_archive(client)
         symbols = {SECTORS.get(str(row.get("sector") or "").lower()) for row in rows} - {None}
         for symbol in sorted(symbols | {"SPY"}):
             jobs[("benchmarks", symbol)] = lambda symbol=symbol: fetch_benchmark(symbol)
@@ -447,7 +496,7 @@ def collect(rows, *, now=None):
         result["social_configured"] = bool(username and password)
         def run(job):
             (kind, key), fn = job
-            return kind, key, cached_read(f"{kind}-{key}", fn, now)
+            return kind, key, cached_read(f"{kind}-{key}", fn, now, TTL_HOURS.get((kind, key), 6))
         progress.emit(activity="Checking macro sentiment and sector benchmarks")
         with ThreadPoolExecutor(max_workers=4) as pool:
             for i, (kind, key, value) in enumerate(pool.map(run, jobs.items()), 1):
@@ -455,7 +504,7 @@ def collect(rows, *, now=None):
                 progress.emit(activity=f"Sentiment sources checked: {i}/{len(jobs)}")
     result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
     result["history"]["aaii"] = aaii.spread_series(config.DATA_DIR, result["macro"]["aaii"])
-    result["history"]["put_call"] = put_call_series()
+    result["history"]["put_call"] = put_call_series((result["history"].get("put_call_archive") or {}).get("daily") or [])
     return result
 
 
@@ -492,12 +541,13 @@ def with_replica(cnn, replica, today):
 def chart_history(macro, history):
     """S&P 500 closes and each sentiment series, as [date, value] pairs, for the dashboard's macro chart."""
     cnn = (macro.get("cnn") or {}).get("history") or []
-    fear = (dict(name="CNN Fear & Greed", source="CNN", points=cnn) if len(cnn) >= 20 else
+    fear = (dict(name="Fear & Greed", source="CNN", points=cnn) if len(cnn) >= 20 else
             dict(name="Fear & Greed replica", source="Replica from public data", points=(macro.get("fear_greed") or {}).get("history") or []))
     return {"spx": (history.get("spx") or {}).get("points") or [], "series": {
         "aaii": dict(name="AAII bull–bear spread", unit=" pp", source="AAII weekly survey", frequency="weekly", points=history.get("aaii") or []),
         "vix": dict(name="VIX", unit="", source="Cboe", frequency="daily", points=(macro.get("vix") or {}).get("history") or []),
-        "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe", frequency="daily", points=history.get("put_call") or []),
+        "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics",
+                         frequency="daily", points=history.get("put_call") or []),
         "fear_greed": {**fear, "unit": "", "frequency": "daily"},
     }}
 

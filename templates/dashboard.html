@@ -18,7 +18,9 @@
   </header>
 
   <section class="macro panel" aria-labelledby="macro-title">
-    <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title">Macro sentiment</h2></div><span id="macro-summary" class="sentiment-badge">Awaiting data</span></div>
+    <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title"><button type="button" class="macro-toggle" id="macro-toggle" aria-expanded="true" aria-controls="macro-body"><span class="chevron" aria-hidden="true"></span>Macro sentiment</button></h2></div><span id="macro-summary" class="sentiment-badge">Awaiting data</span></div>
+    <p class="macro-oneline" id="macro-oneline" hidden></p>
+    <div id="macro-body">
     <p class="macro-note" id="macro-note"></p>
     <div class="macro-grid" id="macro-cards"></div>
     <figure class="macro-chart" aria-labelledby="macro-chart-title">
@@ -38,7 +40,9 @@
             <button type="button" role="radio" data-mrange="1Y" aria-checked="true">1Y</button>
             <button type="button" role="radio" data-mrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
             <button type="button" role="radio" data-mrange="10Y" aria-checked="false" tabindex="-1">10Y</button>
+            <button type="button" role="radio" data-mrange="MAX" aria-checked="false" tabindex="-1" title="Since July 1987, when AAII's survey begins">Max</button>
           </div>
+          <label class="switch" for="macro-log"><input type="checkbox" id="macro-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
         </div>
       </figcaption>
       <div class="macro-legend" id="macro-legend"></div>
@@ -47,6 +51,7 @@
       <p class="macro-note" id="macro-windows-note"></p>
     </figure>
     <details class="sentiment-method"><summary>How to read these signals</summary><p>These readings describe different populations and time horizons. VIX measures expected volatility, put/call ratios measure trading activity, AAII surveys the next six months, and CNN combines seven indicators. CNN overlaps with VIX and options data. We show their agreement or disagreement, not an average or a market forecast. Missing and stale readings are excluded. Daily readings become stale after 4 calendar days, AAII after 10, CNN after 2. Fetch time is separate from observation time.</p></details>
+    </div>
   </section>
 
   <div class="cap-tabs" id="cap-tabs" role="tablist" aria-label="Market capitalization in US dollars">

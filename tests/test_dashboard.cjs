@@ -328,7 +328,7 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
     if (d.getUTCDay() % 6) days.push(d.toISOString().slice(0, 10));
   }
   const spx = days.map((d, i) => [d, 5000 + i * 3 + (i % 7) * 20]);
-  const tracking = spx.map(([d, v]) => [d, v / 100]);  // moves with the index by construction
+  const tracking = spx.map(([d, v]) => [d, v / 100]).filter(([d]) => d < '2025-03-01' || d > '2025-05-31');  // moves with the index; one gap
   const history = {spx, series: {
     aaii: {name: 'AAII bull–bear spread', frequency: 'weekly', source: 'AAII weekly survey', points: spx.filter((_, i) => i % 5 === 2).map(([d, v]) => [d, (v - 6000) / 50])},
     vix: {name: 'VIX', frequency: 'daily', source: 'Cboe', points: tracking},
@@ -343,10 +343,14 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(plot(), /class="line-ind" d="M/);
   assert.match(plot(), /class="ref"/);  // VIX reference line at 20
   assert.match(plot(), /VIX<tspan class="ref-label"> · line at 20<\/tspan>/);
-  assert.equal((table().match(/<tr/g) || []).length, 7);  // header plus six ranges
+  assert.equal((table().match(/<tr/g) || []).length, 8);  // header plus seven ranges
   assert.match(table(), /<tr class="current"><th scope="row">1 year<\/th>/);
   assert.match(table(), /\+(0\.9\d|1\.00) · moves with <span class="sub">n=/);
   assert.match(app.element('macro-chart-note').textContent, /VIX · Cboe · since Sep 2, 2024/);
+  app.click('macro-range-seg', 'mrange', 'MAX');
+  assert.match(table(), /<tr class="current"><th scope="row">Since 1987<\/th>/);
+  assert.match(app.element('macro-legend').innerHTML, /% since 1987/);
+  assert.equal((plot().match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 2);  // the line breaks at the gap
   app.click('macro-range-seg', 'mrange', '1M');
   assert.match(table(), /<tr class="current"><th scope="row">1 month<\/th>/);
   assert.equal(app.storage['ivl-view'].mrange, '1M');
@@ -356,6 +360,32 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(plot(), /No Equity put\/call, 5-day average data in this range/);
   const empty = renderEarnings(null, {}, {macro: {cards: []}});
   assert.match(empty.element('macro-plot').innerHTML, /S&amp;P 500 history appears after the next data refresh/);
+});
+
+test('macro panel collapses to one line of readings, and the S&P 500 can use a log scale', () => {
+  const cards = [{key:'vix', value:14.81, reading:'14.81', status:'ok', as_of:'2026-09-18', max_age:4, signal:'Calm', direction:1},
+    {key:'aaii', value:-24.5, reading:'-24.5 pp', status:'ok', as_of:'2026-08-01', max_age:10, signal:'Bearish tilt', direction:-1},
+    {key:'cnn', name:'CNN Fear & Greed', value:28.6, reading:'28.6/100', status:'ok', as_of:'2026-09-18', max_age:2, signal:'Fear', direction:-1}];
+  const spx = []; for (let y = 1990; y <= 2026; y++) spx.push([`${y}-01-03`, 300 * 1.1 ** (y - 1990)]);
+  const history = {spx, series: {aaii: {points: []}, vix: {points: []}, put_call: {points: []}, fear_greed: {points: []}}};
+  const app = renderEarnings(null, {}, {macro: {cards, history}, saved: {macroOpen: false, mrange: 'MAX', mlog: true}});
+  assert.equal(app.element('macro-body').hidden, true);
+  assert.equal(app.element('macro-oneline').hidden, false);
+  assert.equal(app.element('macro-toggle').attributes['aria-expanded'], 'false');
+  const line = app.element('macro-oneline').innerHTML;
+  assert.match(line, /<b>VIX<\/b> 14.81 · Calm/);
+  assert.match(line, /<b>AAII<\/b> stale/);
+  assert.match(line, /<b>Put\/call<\/b> —/);
+  assert.match(line, /<b>Fear &amp; Greed<\/b> 28.6\/100 · Fear/);
+  assert.match(app.element('macro-cards').innerHTML, /<h3>Fear &amp; Greed<\/h3>/);  // reports saved before the rename
+  const ticks = [...app.element('macro-plot').innerHTML.matchAll(/class="tick" x="\d+" y="[\d.]+" text-anchor="end">([^<]+)</g)].map(m => m[1]);
+  assert.deepEqual(ticks, ['500', '1,000', '2,000', '5,000', '10,000']);  // equal ratios, equal height
+  assert.match(app.element('macro-plot').innerHTML, /S&amp;P 500<tspan class="ref-label"> · log scale<\/tspan>/);
+  app.element('macro-log').handlers.change({target: {checked: false}});
+  assert.doesNotMatch(app.element('macro-plot').innerHTML, /log scale/);
+  app.element('macro-toggle').handlers.click({});
+  assert.equal(app.element('macro-body').hidden, false);
+  assert.deepEqual([app.storage['ivl-view'].mlog, app.storage['ivl-view'].macroOpen], [false, true]);
 });
 
 test('macro excludes stale data and retains source observation dates', () => {

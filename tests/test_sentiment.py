@@ -80,7 +80,7 @@ class MacroTests(unittest.TestCase):
         cnn = {"status": "ok", "value": 28.6, "reading": "28.6/100", "signal": "Fear", "direction": -1, "as_of": "2026-09-18"}
         card = lambda sources: evaluate(sources={"macro": sources})["macro_sentiment"]["cards"][3]
         both = card({"cnn": cnn, "fear_greed": replica})
-        self.assertEqual((both["name"], both["value"], both["replica"]["value"]), ("CNN Fear & Greed", 28.6, 31.2))
+        self.assertEqual((both["name"], both["value"], both["replica"]["value"]), ("Fear & Greed", 28.6, 31.2))
         self.assertNotIn("replica_of", both)
         for missing in ({}, {"cnn": {**cnn, "as_of": "2026-09-01", "status": "cached"}}):
             stand_in = card({**missing, "fear_greed": replica})
@@ -88,7 +88,7 @@ class MacroTests(unittest.TestCase):
                              ("Fear & Greed replica", 31.2, "CNN Fear & Greed"))
         self.assertEqual(card({"cnn": {**cnn, "as_of": "2026-09-01"}, "fear_greed": replica})["cnn_status"], "stale")
         stale_replica = card({"fear_greed": {**replica, "as_of": "2026-09-01"}})
-        self.assertEqual((stale_replica["name"], stale_replica["status"]), ("CNN Fear & Greed", "unavailable"))
+        self.assertEqual((stale_replica["name"], stale_replica["status"]), ("Fear & Greed", "unavailable"))
 
     def test_aaii_card_uses_the_latest_week_from_the_page_an_entry_or_an_imported_spreadsheet(self):
         imported = {"status": "ok", "value": -35.0, "reading": "-35.0 pp", "signal": "Bearish tilt", "direction": -1,
@@ -118,7 +118,9 @@ class MacroTests(unittest.TestCase):
 
     def test_vix_and_cnn_keep_dated_history_for_the_chart(self):
         rows = "DATE,OPEN,HIGH,LOW,CLOSE\n01/02/2015,1,1,1,19.2\n09/16/2026,1,1,1,17.71\n09/17/2026,1,1,1,15.44\n"
-        self.assertEqual(s.parse_vix(rows, TODAY)["history"], [["2026-09-16", 17.71], ["2026-09-17", 15.44]])  # 10 years
+        self.assertEqual(s.parse_vix(rows, TODAY)["history"], [["2015-01-02", 19.2], ["2026-09-16", 17.71], ["2026-09-17", 15.44]])
+        old = rows.replace("01/02/2015,1,1,1,19.2", "01/01/1985,1,1,1,30\n01/05/2015,1,1,1,18\n01/06/2015,1,1,1,17\n01/08/2015,1,1,1,16")
+        self.assertEqual(s.parse_vix(old, TODAY)["history"][:2], [["2015-01-06", 17.0], ["2015-01-08", 16.0]])  # weekly before 10 years, none before 1987
         raw = {"fear_and_greed": {"score": 28.6, "rating": "fear", "timestamp": "2026-09-18T18:13:36+00:00"},
                "fear_and_greed_historical": {"data": [{"x": 1789603200000, "y": 28.29}, {"x": 1789689600000, "y": "bad"},
                                                       {"x": 1789862400000, "y": 30}]}}
@@ -140,6 +142,27 @@ class MacroTests(unittest.TestCase):
             s.write_json(Path(temp) / "sentiment" / "put_call_history.json", {"sessions": sessions})
             self.assertEqual(s.put_call_series(), [["2026-09-14", 0.7], ["2026-09-15", 0.8]])
 
+    def test_weekly_thinning_keeps_each_week_s_last_point_before_the_cutoff(self):
+        rows = [(date(2016, 9, 5) + timedelta(days=i), float(i)) for i in range(10)]  # Mon Sep 5 to Wed Sep 14
+        self.assertEqual(s.thinned(rows, date(2016, 9, 12)),
+                         [(date(2016, 9, 7), 2.0), (date(2016, 9, 11), 6.0), (date(2016, 9, 12), 7.0),
+                          (date(2016, 9, 13), 8.0), (date(2016, 9, 14), 9.0)])
+
+    def test_cboe_archive_rows_are_read_after_the_disclaimer_and_joined_without_bridging_gaps(self):
+        text = ('Cboe data is provided for informational purposes only\ufffd,,,,\nEquity P/C Ratios,,,,\n'
+                'Date,Equity Call Volume,Equity Put Volume,Equity Total Volume,Equity P/C Ratio\n'
+                + "".join(f"{(date(2003, 10, 1) + timedelta(days=i)).strftime('%m/%d/%Y')},1000,{400 + i},0,0\n" for i in range(120))
+                + "bad,row\n")
+        daily = s.parse_put_call_archive(text)
+        self.assertEqual((len(daily), daily[date(2003, 10, 2)]), (120, 0.401))
+        with self.assertRaises(ValueError):
+            s.parse_put_call_archive("DATE,CALL,PUT\n10/1/2003,1,1\n")
+        archive = [[f"2019-10-{d:02d}", 0.5] for d in (1, 2, 3, 4, 7)]
+        stored = {f"2026-09-{d:02d}": {"equity": [100, 70], "etp": [1, 1]} for d in (8, 9, 10, 11, 14)}
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+            s.write_json(Path(temp) / "sentiment" / "put_call_history.json", {"sessions": stored})
+            self.assertEqual(s.put_call_series(archive), [["2019-10-07", 0.5], ["2026-09-14", 0.7]])  # no average spans the gap
+
     def test_chart_history_prefers_cnn_and_cards_never_carry_it(self):
         replica = {"status": "ok", "value": 31.0, "as_of": "2026-09-17", "history": [["2026-09-17", 31.0]]}
         short_cnn = {"status": "ok", "value": 28.6, "as_of": "2026-09-18", "history": [["2026-09-17", 28.3]]}
@@ -147,7 +170,7 @@ class MacroTests(unittest.TestCase):
         self.assertEqual((chart["series"]["fear_greed"]["name"], chart["series"]["fear_greed"]["points"]),
                          ("Fear & Greed replica", [["2026-09-17", 31.0]]))
         long_cnn = {**short_cnn, "history": [[f"2026-08-{d:02d}", 40.0] for d in range(1, 26)]}
-        self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["name"], "CNN Fear & Greed")
+        self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["name"], "Fear & Greed")
         sources = {"macro": {"vix": {"status": "ok", "value": 15.4, "as_of": "2026-09-17", "history": [["2026-09-17", 15.4]]},
                              "cnn": long_cnn, "fear_greed": replica}, "history": {"spx": {"points": [["2026-09-17", 7637.76]]}}}
         macro = evaluate(sources=sources)["macro_sentiment"]
