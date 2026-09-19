@@ -43,6 +43,10 @@ PUT_CALL_ARCHIVES = (             # Cboe's discontinued daily files; the newer o
     "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypc.csv",         # Nov 2006 – Oct 2019
 )
 TTL_HOURS = {("history", "put_call_archive"): 24 * 30}  # Cboe no longer updates these files
+COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
+    ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31",
+    ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
+}
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
@@ -203,14 +207,17 @@ def request_text(client, url, errors="strict", **kwargs):
     return data.decode("utf-8", errors)
 
 
-def cached_read(key, fetch, now, ttl_hours=6):
-    """Cache successful observations only. Keep provenance when refresh fails."""
+def cached_read(key, fetch, now, ttl_hours=6, complete=None):
+    """Cache successful observations only. Keep provenance when refresh fails.
+
+    `complete` rejects a fresh copy that holds less than this version needs (saved by an older version), so it is fetched again.
+    """
     path = config.DATA_DIR / "sentiment" / f"{key}.json"
     saved = None
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
         age = (now - datetime.fromisoformat(saved["fetched_at"])).total_seconds()
-        if 0 <= age < ttl_hours * 3600:
+        if 0 <= age < ttl_hours * 3600 and (complete is None or complete(saved)):
             return saved
     except (OSError, ValueError, TypeError, KeyError):
         saved = None
@@ -496,7 +503,7 @@ def collect(rows, *, now=None):
         result["social_configured"] = bool(username and password)
         def run(job):
             (kind, key), fn = job
-            return kind, key, cached_read(f"{kind}-{key}", fn, now, TTL_HOURS.get((kind, key), 6))
+            return kind, key, cached_read(f"{kind}-{key}", fn, now, TTL_HOURS.get((kind, key), 6), COMPLETE.get((kind, key)))
         progress.emit(activity="Checking macro sentiment and sector benchmarks")
         with ThreadPoolExecutor(max_workers=4) as pool:
             for i, (kind, key, value) in enumerate(pool.map(run, jobs.items()), 1):

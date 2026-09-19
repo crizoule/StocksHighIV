@@ -198,6 +198,23 @@ class MacroTests(unittest.TestCase):
             s.put_call_history(None, days, s.time.monotonic() - 1, workers=1)
             self.assertEqual(asked, [])  # an exhausted budget sends nothing
 
+    def test_a_fresh_cache_with_too_little_history_is_fetched_again(self):
+        short = {"points": [["2016-09-19", 2139.12], ["2026-09-17", 7637.76]]}
+        full = {"points": [["1987-07-01", 302.94], ["2026-09-17", 7637.76]]}
+        spx, vix = s.COMPLETE[("history", "spx")], s.COMPLETE[("macro", "vix")]
+        self.assertEqual((spx(short), spx(full), spx({"points": []})), (False, True, False))
+        self.assertEqual((vix({"history": [["2016-09-12", 15.2]]}), vix({"history": [["1990-01-02", 17.24]]})), (False, True))
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+            s.cached_read("history-spx", lambda: short, NOW)  # saved by 1.5.0, an hour earlier
+            later = NOW + timedelta(hours=1)
+            self.assertEqual(s.cached_read("history-spx", lambda: full, later, complete=spx)["points"][0][0], "1987-07-01")
+            self.assertEqual(s.cached_read("history-spx", lambda: short, later, complete=spx)["points"][0][0], "1987-07-01")  # now reused
+            def blocked():
+                raise ValueError("offline")
+            s.write_json(Path(temp) / "sentiment" / "history-spx.json", {**short, "fetched_at": NOW.isoformat(), "status": "ok"})
+            kept = s.cached_read("history-spx", blocked, later, complete=spx)
+            self.assertEqual((kept["status"], kept["points"][0][0]), ("cached", "2016-09-19"))  # offline: the shorter copy beats nothing
+
     def test_cache_failure_never_replaces_fetch_time_with_now(self):
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
             saved = s.cached_read("vix", lambda: {"as_of": "2026-09-17", "value": 15}, NOW)
