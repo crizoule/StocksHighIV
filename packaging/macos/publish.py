@@ -41,11 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Extends the S&P 500 and sentiment chart back to 1987 with a new Max range. The S&P 500 and AAII go back to July 1987, VIX to 1990, and put/call to 2003. Points older than 10 years are weekly. Gaps in a series show as breaks. A Log scale switch keeps decades of S&P 500 growth readable.
+    notes = '''Fixes the S&P 500 and sentiment chart stopping in 2016 after updating to 1.6.0. Data downloaded by 1.5.0 covered only 10 years and was reused for up to six hours. The app now notices when saved data is too short and downloads the full history, back to 1987.
 
-The macro panel now collapses to a single line of readings: click its title. The Fear & Greed card drops "CNN" from its title, and the watchlist section in the app's top bar starts closed.
-
-Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to load the longer history.
+Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data. Refresh market data after installing to load the full history.
 
 For a new installation, download the ZIP for your platform, extract it, and open StocksHighIV.app or StocksHighIV.exe. Requires Python 3.11+. The Mac app is signed and Apple-notarized. Windows supports Windows 10/11 x64; the executable is not Authenticode-signed.'''
     subprocess.run(['gh', 'release', 'create', f'v{version}', str(archive), str(feed), str(windows_archive), str(windows_feed), '--repo', REPO,
