@@ -58,7 +58,7 @@ class PriceTests(TempProjectTest):
         with patch.object(prices.yf, "Ticker") as ticker, \
                 patch.object(details, "fetch", return_value=info), \
                 patch.object(borrow, "load", return_value={}), \
-                patch.object(report, "_bootstrap_history"), \
+                patch.object(report, "_bootstrap_points", return_value=[]), \
                 patch.object(report.news, "fetch", return_value=[]), \
                 patch.object(report, "log"):
             ticker.return_value.history.side_effect = RuntimeError("provider unavailable")
@@ -90,12 +90,29 @@ class BorrowTests(unittest.TestCase):
         self.assertEqual(borrow.lookup(table, {"symbol": "H.TO", "market": "CA"})["fee"], 9.5)
 
 
+class SettledTests(unittest.TestCase):
+    def test_cboe_follows_spys_session_and_mx_the_weekday_calendar(self):
+        ny = scan.market.MARKET_TZ
+        at = lambda *args: datetime(*args, tzinfo=ny)
+        with patch.object(iv, "cboe_iv30", return_value={**QUOTE, "quote_date": "2026-09-18"}) as probe:
+            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 19, 12)),  # Saturday
+                             {"cboe": "2026-09-18T20:30:00+00:00", "mx": "2026-09-18T20:30:00+00:00"})
+            # A Monday holiday: SPY still shows Friday, so Friday's quotes stay final; the calendar expects a session.
+            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 18)),
+                             {"cboe": "2026-09-18T20:30:00+00:00", "mx": "2026-09-21T20:30:00+00:00"})
+            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 11)), {"cboe": None, "mx": None})  # trading
+            self.assertEqual(probe.call_count, 2)  # no probe while the market is open
+            probe.side_effect = net.FetchError("offline")
+            self.assertIsNone(scan.settled_since(None, None, at(2026, 9, 19, 12))["cboe"])
+
+
 class ScanTests(TempProjectTest):
     def setUp(self):
         super().setUp()
         self.stack.enter_context(patch.object(scan, "load_universe", return_value=[STOCK]))
         self.stack.enter_context(patch.object(scan, "log"))
         self.fetch = self.stack.enter_context(patch.object(iv, "cboe_iv30"))
+        self.settled = self.stack.enter_context(patch.object(scan, "settled_since", return_value={"cboe": None, "mx": None}))
 
     def test_failed_quote_is_retried_and_success_is_resumed(self):
         self.fetch.side_effect = [net.FetchError("offline"), QUOTE]
@@ -124,6 +141,71 @@ class ScanTests(TempProjectTest):
         with closing(store.connect()) as conn:
             self.assertEqual(store.scan_results(conn, RUN_DATE)[0]["iv30"], 80)
             self.assertEqual(store.iv_series(conn, "TEST"), [(RUN_DATE, 80)])
+
+    def test_quotes_fetched_after_the_close_are_reused_until_the_next_session(self):
+        friday_evening = "2026-09-18T21:00:00+00:00"
+        with closing(store.connect()) as conn:
+            store.record_scan(conn, RUN_DATE, "TEST", "cboe", QUOTE, fetched_at=friday_evening)
+            store.record_scan(conn, RUN_DATE, "OTHER", "cboe", None, fetched_at=friday_evening)  # no IV is final too
+            store.record_scan(conn, RUN_DATE, "LATE", "cboe", QUOTE, fetched_at="2026-09-18T19:00:00+00:00")  # mid-session
+            store.record_scan(conn, RUN_DATE, "OLD", "cboe", QUOTE)  # saved before fetch times were kept
+        universe = [{**STOCK, "symbol": symbol} for symbol in ("TEST", "OTHER", "LATE", "OLD")]
+        self.settled.return_value = {"cboe": "2026-09-18T20:30:00+00:00", "mx": None}
+        self.fetch.return_value = {**QUOTE, "iv30": 80}
+        with patch.object(scan, "load_universe", return_value=universe):
+            scan.scan("2026-09-19")
+            self.assertEqual(self.fetch.call_count, 2)  # LATE and OLD only
+            with closing(store.connect()) as conn:
+                self.assertEqual(store.scanned_symbols(conn, "2026-09-19"), {"TEST", "OTHER", "LATE", "OLD"})
+                self.assertEqual({r["symbol"]: r["iv30"] for r in store.scan_results(conn, "2026-09-19")},
+                                 {"TEST": 40, "LATE": 80, "OLD": 80})
+                self.assertEqual(conn.execute("SELECT fetched_at FROM scans WHERE run_date = '2026-09-19' AND symbol = 'TEST'").fetchone()[0],
+                                 friday_evening)  # a copy keeps its original download time
+            scan.scan("2026-09-19", refresh_quotes=True)  # final quotes are not downloaded again
+            self.assertEqual(self.fetch.call_count, 2)
+            self.settled.return_value = {"cboe": "2026-09-21T20:30:00+00:00", "mx": None}  # Monday has closed
+            scan.scan("2026-09-21")
+            self.assertEqual(self.fetch.call_count, 6)  # a new session: every quote is downloaded again
+    def test_priority_pass_downloads_likely_leaders_first(self):
+        mid = lambda symbol, **extra: {**STOCK, "symbol": symbol, "cboe": symbol, **extra}
+        universe = [mid("HIGH"), mid("LOW"), mid("NOIV"), mid("NEW"), mid("BIG", market_cap_usd=200e9),
+                    mid("INTER", also_listed="INTER.TO"), mid("FAV")]
+        with closing(store.connect()) as conn:
+            for symbol, value in (("HIGH", 90), ("LOW", 20), ("BIG", 20), ("INTER", 20), ("FAV", 20)):
+                store.record_scan(conn, "2026-09-17", symbol, "cboe", {**QUOTE, "iv30": value})
+            store.record_scan(conn, "2026-09-17", "NOIV", "cboe", None)
+        asked = []
+        self.fetch.side_effect = lambda client, limiter, symbol: asked.append(symbol) or QUOTE
+        with patch.object(scan, "load_universe", return_value=universe), patch.object(config, "PRIORITY_TOP", 1), \
+                patch.object(scan.watchlist, "load", return_value=["FAV"]):
+            self.assertEqual(scan.scan(RUN_DATE, first=True), (RUN_DATE, 2))
+            self.assertEqual(sorted(asked), ["BIG", "FAV", "HIGH", "INTER", "NEW"])
+            asked.clear()
+            self.assertEqual(scan.scan(RUN_DATE), (RUN_DATE, 0))
+            self.assertEqual(sorted(asked), ["LOW", "NOIV"])
+
+    def test_without_an_earlier_scan_everything_is_one_pass(self):
+        self.fetch.return_value = QUOTE
+        self.assertEqual(scan.scan(RUN_DATE, first=True), (RUN_DATE, 0))
+        self.assertEqual(self.fetch.call_count, 1)
+
+    def test_run_builds_a_preliminary_dashboard_then_the_complete_one(self):
+        calls = []
+        def fake_scan(run_date=None, **kwargs):
+            calls.append(("scan", kwargs.get("first", False)))
+            return RUN_DATE, 5 if kwargs.get("first") else 0
+        def fake_build(run_date, *, cached_snapshot=None, preliminary=0):
+            calls.append(("build", preliminary, cached_snapshot))
+            config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {"run_date": run_date, "rows": [], **({"preliminary": {"remaining": preliminary}} if preliminary else {})}
+            (config.SNAPSHOT_DIR / f"{run_date}.json").write_text(json.dumps(payload))
+            return config.SNAPSHOT_DIR / f"{run_date}.json"
+        with patch.object(scan, "scan", side_effect=fake_scan), patch.object(report, "build", side_effect=fake_build), \
+                patch.object(report, "log"):
+            report.run()
+        self.assertEqual([c[:2] for c in calls], [("scan", True), ("build", 5), ("scan", False), ("build", 0)])
+        self.assertIsNone(calls[1][2])
+        self.assertEqual(calls[3][2]["preliminary"], {"remaining": 5})  # the complete build reuses the preliminary rows
 
     def test_malformed_quote_does_not_abort_remaining_symbols(self):
         self.fetch.side_effect = [ValueError("invalid payload"), QUOTE]
@@ -172,9 +254,10 @@ class ScanTests(TempProjectTest):
             scanner.assert_called_once_with(refresh_universe=False, refresh_quotes=True)
             build.assert_not_called()
             scanner.reset_mock()
+            scanner.return_value = (RUN_DATE, 0)
             main(["run", "--refresh-universe", "--refresh-quotes"])
-            scanner.assert_called_once_with(refresh_universe=True, refresh_quotes=True)
-            build.assert_called_once_with()
+            scanner.assert_called_once_with(refresh_universe=True, refresh_quotes=True, first=True)
+            build.assert_called_once_with(RUN_DATE)
 
 
 class ProviderTests(unittest.TestCase):

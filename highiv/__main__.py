@@ -21,10 +21,13 @@ def main(argv: list[str] | None = None) -> None:
             cmd.add_argument("--refresh-quotes", action="store_true", help="Fetch all quotes again, including today's completed symbols.")
     args = parser.parse_args(argv)
 
-    if args.command in ("scan", "run"):
+    if args.command == "scan":
         from .scan import scan
         scan(refresh_universe=args.refresh_universe, refresh_quotes=args.refresh_quotes)
-    if args.command in ("build", "run"):
+    if args.command == "run":
+        from .report import run
+        run(refresh_universe=args.refresh_universe, refresh_quotes=args.refresh_quotes)
+    if args.command == "build":
         from .report import build
         build()
     if args.command == "explain":

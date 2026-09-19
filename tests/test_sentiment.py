@@ -215,6 +215,30 @@ class MacroTests(unittest.TestCase):
             kept = s.cached_read("history-spx", blocked, later, complete=spx)
             self.assertEqual((kept["status"], kept["points"][0][0]), ("cached", "2016-09-19"))  # offline: the shorter copy beats nothing
 
+    def test_a_reading_of_the_latest_close_is_reused_until_the_next_open(self):
+        ny = s.context.MARKET_TZ
+        at = lambda *args: datetime(*args, tzinfo=ny)
+        self.assertEqual(s.market.last_session(at(2026, 9, 18, 16, 29))[0].isoformat(), "2026-09-17")
+        self.assertEqual(s.market.last_session(at(2026, 9, 18, 16, 30)), (date(2026, 9, 18), at(2026, 9, 21, 9, 30)))  # Friday → Monday
+        self.assertEqual(s.market.last_session(at(2026, 9, 20, 12))[0].isoformat(), "2026-09-18")  # Sunday
+        friday = {"as_of": "2026-09-18", "value": 15, "fetched_at": at(2026, 9, 18, 17).isoformat()}
+        self.assertTrue(s.settled(friday, at(2026, 9, 21, 9, 29)))  # the whole weekend
+        self.assertFalse(s.settled(friday, at(2026, 9, 21, 9, 30)))  # Monday's session has opened
+        self.assertFalse(s.settled({**friday, "as_of": "2026-09-17"}, at(2026, 9, 19, 12)))  # fetched before Cboe posted Friday
+        self.assertFalse(s.settled({**friday, "fetched_at": at(2026, 9, 18, 16).isoformat()}, at(2026, 9, 19, 12)))  # before the close settled
+        self.assertTrue(s.settled({"points": [["2026-09-18", 1]], "fetched_at": friday["fetched_at"]}, at(2026, 9, 19, 12)))
+        bars = {"prices": {"1D": {"t": [int(at(2026, 9, 18, 0).timestamp())], "c": [1]}}, "fetched_at": friday["fetched_at"]}
+        self.assertTrue(s.settled(bars, at(2026, 9, 19, 12)))
+        filling = {**friday, "components": [{"detail": "Building Cboe history: 100/649 sessions stored"}]}
+        self.assertFalse(s.settled(filling, at(2026, 9, 19, 12)))  # the backfill keeps going
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
+            s.write_json(Path(temp) / "sentiment" / "macro-vix.json", friday)
+            fetched = []
+            fetch = lambda: fetched.append(1) or {"as_of": "2026-09-18", "value": 16}
+            self.assertEqual(s.cached_read("macro-vix", fetch, at(2026, 9, 20, 12), sessions=True)["value"], 15)
+            self.assertEqual(s.cached_read("macro-vix", fetch, at(2026, 9, 20, 12))["value"], 16)  # news and social: expiry only
+            self.assertEqual(len(fetched), 1)
+
     def test_cache_failure_never_replaces_fetch_time_with_now(self):
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
             saved = s.cached_read("vix", lambda: {"as_of": "2026-09-17", "value": 15}, NOW)

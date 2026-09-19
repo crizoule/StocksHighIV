@@ -1,5 +1,5 @@
 from collections import Counter
-from contextlib import closing
+from contextlib import ExitStack, closing
 import json
 import unittest
 from unittest.mock import patch
@@ -45,7 +45,7 @@ class CapBandTests(TempProjectTest):
         infos = {s['symbol']: self.info(s) for s in stocks}
         with patch.object(config, 'TOP_N', 2), patch.object(config, 'MAX_DETAIL_LOOKUPS', 2), \
                 patch.object(details, 'fetch', side_effect=lambda symbol: infos[symbol]) as lookup, \
-                patch.object(report.borrow, 'load', return_value={}), patch.object(report, '_bootstrap_history'), \
+                patch.object(report.borrow, 'load', return_value={}), patch.object(report, '_bootstrap_points', return_value=[]), \
                 patch.object(report.prices, 'fetch', return_value=(None, {})), \
                 patch.object(report.news, 'fetch', return_value=[]), patch.object(report, 'log'):
             report.build(RUN_DATE)
@@ -63,6 +63,36 @@ class CapBandTests(TempProjectTest):
         reused = json.loads((config.SNAPSHOT_DIR / f'{RUN_DATE}.json').read_text())
         self.assertEqual(reused['rows'], payload['rows'])
 
+    def test_rows_enriched_after_the_close_are_kept_for_the_same_session(self):
+        stocks = self.fixture()
+        infos = {s['symbol']: self.info(s) for s in stocks}
+        patches = lambda: (patch.object(config, 'TOP_N', 2), patch.object(report.borrow, 'load', return_value={}),
+                           patch.object(report, '_bootstrap_points', return_value=[]), patch.object(report, 'log'),
+                           patch.object(report.prices, 'fetch', return_value=(None, {})))
+        with ExitStack() as stack:
+            for item in patches():
+                stack.enter_context(item)
+            stack.enter_context(patch.object(details, 'fetch', side_effect=lambda symbol: infos[symbol]))
+            stack.enter_context(patch.object(report.news, 'fetch', return_value=[]))
+            report.build(RUN_DATE)  # generated now, after the 2026-09-18 close
+        payload = json.loads((config.SNAPSHOT_DIR / f'{RUN_DATE}.json').read_text())
+        with closing(store.connect()) as conn:
+            for i, stock in enumerate(stocks):  # the next day's scan copied Friday's final quotes
+                store.record_scan(conn, '2026-09-19', stock['symbol'], 'cboe', {**QUOTE, 'iv30': 100 - i})
+            store.record_scan(conn, '2026-09-19', 'BIG1', 'cboe', {**QUOTE, 'iv30': 95, 'quote_date': '2026-09-19'})
+        headline = [{'title': 'Weekend news'}]
+        with ExitStack() as stack:
+            for item in patches():
+                stack.enter_context(item)
+            lookup = stack.enter_context(patch.object(details, 'fetch', side_effect=lambda symbol: infos[symbol]))
+            checked = stack.enter_context(patch.object(report.news, 'fetch', return_value=headline))
+            report.build('2026-09-19')
+        rows = {r['symbol']: r for r in json.loads((config.SNAPSHOT_DIR / '2026-09-19.json').read_text())['rows']}
+        self.assertEqual([call.args[0] for call in lookup.call_args_list], ['BIG1'])  # only the newer quote is enriched again
+        self.assertEqual(checked.call_count, 4)  # headlines stay current for every row
+        self.assertEqual(rows['MID0']['news_headlines'], headline)
+        self.assertEqual(rows['MID0']['details_fetched_at'], payload['rows'][0]['details_fetched_at'])
+
     def test_watched_low_iv_stock_bypasses_enrichment_budget_and_cap_floor(self):
         stocks = self.fixture()
         infos = {s['symbol']: self.info(s) for s in stocks}
@@ -70,7 +100,7 @@ class CapBandTests(TempProjectTest):
         with patch.object(report.watchlist, 'load', return_value=['MID3']), \
                 patch.object(config, 'MAX_DETAIL_LOOKUPS', 0), \
                 patch.object(details, 'fetch', side_effect=lambda symbol: infos[symbol]), \
-                patch.object(report.borrow, 'load', return_value={}), patch.object(report, '_bootstrap_history'), \
+                patch.object(report.borrow, 'load', return_value={}), patch.object(report, '_bootstrap_points', return_value=[]), \
                 patch.object(report.prices, 'fetch', return_value=(None, {})), \
                 patch.object(report.news, 'fetch', return_value=[]), patch.object(report, 'log'):
             report.build(RUN_DATE)

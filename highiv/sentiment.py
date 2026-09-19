@@ -23,7 +23,7 @@ import httpx
 import pandas as pd
 import yfinance as yf
 
-from . import aaii, config, context, fear_greed, net, progress
+from . import aaii, config, context, fear_greed, market, net, progress
 
 VIX_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
 PC_URL = "https://www.cboe.com/us/options/market_statistics/daily/"
@@ -47,6 +47,7 @@ COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
     ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31",
     ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
 }
+SESSION_KINDS = {"macro", "history", "benchmarks"}  # news and social posts keep arriving while markets are closed
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
@@ -207,17 +208,41 @@ def request_text(client, url, errors="strict", **kwargs):
     return data.decode("utf-8", errors)
 
 
-def cached_read(key, fetch, now, ttl_hours=6, complete=None):
+def session_of(item):
+    """The market date a reading ends on: its as-of date, last history point, or last benchmark bar."""
+    if item.get("as_of"):
+        return str(item["as_of"])[:10]
+    if item.get("points"):
+        return item["points"][-1][0]
+    stamps = ((item.get("prices") or {}).get("1D") or {}).get("t")
+    return datetime.fromtimestamp(stamps[-1], context.MARKET_TZ).date().isoformat() if stamps else None
+
+
+def settled(saved, now):
+    """True while the market stays closed after the session this reading already holds.
+
+    Nothing new trades until the next open, so a copy fetched after the close is reused overnight and over weekends.
+    """
+    session, next_open = market.last_session(now)
+    fetched = datetime.fromisoformat(saved["fetched_at"])
+    closed = market.settled_at(session)
+    # A replica still filling its Cboe history keeps the usual expiry, so the backfill finishes over a few refreshes.
+    filling = any(str(part.get("detail") or "").startswith("Building") for part in saved.get("components") or [])
+    return closed <= fetched <= now < next_open and session_of(saved) == session.isoformat() and not filling
+
+
+def cached_read(key, fetch, now, ttl_hours=6, complete=None, sessions=False):
     """Cache successful observations only. Keep provenance when refresh fails.
 
     `complete` rejects a fresh copy that holds less than this version needs (saved by an older version), so it is fetched again.
+    `sessions` also reuses a copy that already holds the latest closed session until the next open (see `settled`).
     """
     path = config.DATA_DIR / "sentiment" / f"{key}.json"
     saved = None
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
         age = (now - datetime.fromisoformat(saved["fetched_at"])).total_seconds()
-        if 0 <= age < ttl_hours * 3600 and (complete is None or complete(saved)):
+        if (complete is None or complete(saved)) and (0 <= age < ttl_hours * 3600 or sessions and settled(saved, now)):
             return saved
     except (OSError, ValueError, TypeError, KeyError):
         saved = None
@@ -503,7 +528,8 @@ def collect(rows, *, now=None):
         result["social_configured"] = bool(username and password)
         def run(job):
             (kind, key), fn = job
-            return kind, key, cached_read(f"{kind}-{key}", fn, now, TTL_HOURS.get((kind, key), 6), COMPLETE.get((kind, key)))
+            return kind, key, cached_read(f"{kind}-{key}", fn, now, TTL_HOURS.get((kind, key), 6), COMPLETE.get((kind, key)),
+                                          sessions=kind in SESSION_KINDS)
         progress.emit(activity="Checking macro sentiment and sector benchmarks")
         with ThreadPoolExecutor(max_workers=4) as pool:
             for i, (kind, key, value) in enumerate(pool.map(run, jobs.items()), 1):

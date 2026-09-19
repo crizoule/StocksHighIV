@@ -8,12 +8,13 @@ import re
 import statistics
 import tempfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import borrow, config, context, details, explain, iv, net, news, prices, store, progress, watchlist, logos, sentiment
+from . import borrow, config, context, details, explain, iv, market, net, news, prices, store, progress, watchlist, logos, sentiment
 from .universe import norm_name
 
 log = partial(print, flush=True)
@@ -56,22 +57,24 @@ def _load_universe() -> dict[str, dict]:
     return {s["symbol"]: s for s in json.loads(path.read_text(encoding="utf-8"))["stocks"]}
 
 
-def _bootstrap_history(conn, client, limiter, symbol: str, scan: dict) -> None:
-    """Seed IV rank with ~3 months of AlphaQuery history, scaled to CBOE's level on their last shared session."""
+def _needs_bootstrap(conn, symbol: str, scan: dict) -> bool:
     if not scan.get("quote_date") or store.has_source(conn, symbol, "alphaquery"):
-        return
-    if len(store.iv_series(conn, symbol)) >= config.MIN_IV_HISTORY_POINTS:
-        return
+        return False
+    return len(store.iv_series(conn, symbol)) < config.MIN_IV_HISTORY_POINTS
+
+
+def _bootstrap_points(client, limiter, symbol: str, scan: dict) -> list[tuple[str, float]]:
+    """~3 months of AlphaQuery IV history to seed IV rank, scaled to CBOE's level on their last shared session."""
     points = [(d, v) for d, v in iv.alphaquery_history(client, limiter, symbol) if d < scan["quote_date"]]
     if not points:
-        return
+        return []
     scale = 1.0
     if scan.get("iv30_change") is not None and points[-1][1] > 0:
         previous_close_iv = scan["iv30"] - scan["iv30_change"]
         gap = (date.fromisoformat(scan["quote_date"]) - date.fromisoformat(points[-1][0])).days
         if 0 < gap <= 5:
             scale = min(max(previous_close_iv / points[-1][1], 0.75), 1.33)
-    store.insert_history(conn, symbol, [(d, round(v * scale, 3)) for d, v in points], "alphaquery")
+    return [(d, round(v * scale, 3)) for d, v in points]
 
 
 def _iv_stats(series: list[tuple[str, float]], current: float) -> dict:
@@ -303,7 +306,68 @@ def _universe_stats(stocks: list[dict], scans: list[dict]) -> dict:
     }
 
 
-def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -> Path:
+def _settled_rows(run_date: str) -> dict[str, dict]:
+    """Rows of the newest earlier-or-same snapshot, each usable only for the session it was built after the close of."""
+    for path in sorted(config.SNAPSHOT_DIR.glob("*.json"), reverse=True):
+        if path.stem > run_date:
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            built = datetime.fromisoformat(payload["generated_at"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return {}
+        return {r["symbol"]: r for r in payload.get("rows", [])
+                if r.get("quote_date") and built >= market.settled_at(date.fromisoformat(r["quote_date"]))}
+    return {}
+
+
+def _reused(saved: dict, stock: dict, borrow_table: dict, today: date) -> dict:
+    """A row enriched after its session closed: only borrow terms and the earnings countdown can have moved."""
+    loan = borrow.lookup(borrow_table, stock) or {}
+    row = {**saved, "borrow_fee": loan.get("fee"), "borrow_available": loan.get("available"),
+           "borrow_capped": loan.get("capped"), "borrow_fetched_at": loan.get("fetched_at")}
+    if row.get("next_earnings"):
+        in_days = (date.fromisoformat(row["next_earnings"]) - today).days
+        row.update(dict(NO_EARNINGS) if in_days < 0 else {"earnings_in_days": in_days})
+    return row
+
+
+def _enrich(client, limiter, stock: dict, scan: dict, *, is_watched: bool, bootstrap: bool) -> dict:
+    """Network work for one candidate, run on a worker thread; decisions and database writes stay with the caller."""
+    info = details.fetch(stock["yahoo"])
+    if info is None or (not is_watched and (config.excluded_industry(info["industry"])
+                                            or _market_cap_usd(stock, info) < config.MIN_MARKET_CAP_USD)):
+        return {"info": info, "rejected": True}
+    return {"info": info, "rejected": False,
+            "history": _bootstrap_points(client, limiter, stock["symbol"], scan) if bootstrap else [],
+            "prices": prices.fetch(stock["yahoo"]), "headlines": news.fetch(stock["yahoo"]),
+            "news_checked_at": datetime.now(MARKET_TZ).isoformat(timespec="seconds")}
+
+
+def _headlines(stock: dict) -> dict:
+    return {"headlines": news.fetch(stock["yahoo"]), "news_checked_at": datetime.now(MARKET_TZ).isoformat(timespec="seconds")}
+
+
+def run(refresh_universe: bool = False, refresh_quotes: bool = False) -> Path:
+    """Scan, then build. Likely leaders are downloaded first and shown as a preliminary dashboard while the rest download."""
+    from .scan import scan
+    run_date, deferred = scan(refresh_universe=refresh_universe, refresh_quotes=refresh_quotes, first=True)
+    if not deferred:
+        return build(run_date)
+    saved = config.SNAPSHOT_DIR / f"{run_date}.json"
+    try:  # resuming after an interruption: the preliminary dashboard of this run is still good
+        earlier = json.loads(saved.read_text(encoding="utf-8"))
+        earlier = earlier if earlier.get("preliminary") and earlier.get("run_date") == run_date else None
+    except (OSError, ValueError):
+        earlier = None
+    build(run_date, cached_snapshot=earlier, preliminary=deferred)
+    log(f"Preliminary dashboard ready; downloading the remaining {deferred} stocks")
+    scan(run_date)
+    return build(run_date, cached_snapshot=json.loads(saved.read_text(encoding="utf-8")))
+
+
+def build(run_date: str | None = None, *, cached_snapshot: dict | None = None, preliminary: int = 0) -> Path:
+    """Rank a scan and write the dashboard. `preliminary` counts stocks still to download, shown as a notice."""
     progress.emit(phase="enrich", completed=0, total=None, activity="Downloading borrow fees and availability from IBKR")
     conn = store.connect()
     run_date = run_date or store.latest_run_date(conn)
@@ -326,6 +390,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         raise RuntimeError("No usable IV quotes in this scan. Resume to retry failed requests; the previous dashboard has been kept.")
     today = datetime.now(MARKET_TZ).date()
     borrow_table = borrow.load()
+    settled = {} if cached_snapshot is not None else _settled_rows(run_date)
     log(f"Ranking {len(scans)} stocks with IV from the {run_date} scan "
         f"({len(borrow_table)} symbols with borrow data)")
 
@@ -334,54 +399,127 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
     seen_companies: set[str] = set()
     lookups: Counter = Counter()
     caps = {symbol: s["market_cap_usd"] for symbol, s in universe.items()}
-    caps.update({symbol: r["market_cap_usd"] for symbol, r in cached.items() if symbol in universe and r.get("market_cap_usd") is not None})
+    for saved in (cached or settled).values():
+        if saved["symbol"] in universe and saved.get("market_cap_usd") is not None:
+            caps[saved["symbol"]] = saved["market_cap_usd"]
     aq_limiter = net.RateLimiter(min_interval=config.ALPHAQUERY_MIN_INTERVAL_S)
-    with net.make_client() as client:
-        for scan in scans:
-            stock = {**universe[scan["symbol"]], "market_cap_usd": caps[scan["symbol"]]}
-            is_watched = stock["symbol"] in watched
-            if not is_watched and (stock.get("watch_only") or not _still_needed(stock, filled)):
-                continue
-            saved = cached.get(stock["symbol"])
-            if saved and saved["iv30"] == round(scan["iv30"], 1):
-                company = norm_name(saved["name"])
-                if is_watched or company not in seen_companies:
-                    rows.append(saved)
-                    seen_companies.add(company)
-                    filled.update(v for v in VIEWS if _in_view(saved, *v, hq_known=True))
-                continue
-            band = cap_band(stock["market_cap_usd"])
-            if not is_watched and lookups[band] >= config.MAX_DETAIL_LOOKUPS:
-                continue
-            progress.emit(activity=f"Downloading company details for {stock['symbol']}")
-            info = details.fetch(stock["yahoo"])
-            lookups[band] += 1
-            if info is None or (not is_watched and config.excluded_industry(info["industry"])):
-                continue
-            if not is_watched and _market_cap_usd(stock, info) < config.MIN_MARKET_CAP_USD:
-                continue  # the two sources disagree on size; the stock must clear the floor on both
-            caps[stock["symbol"]] = _market_cap_usd(stock, info)
-            company = norm_name(info["name"] or stock["name"])
-            if not is_watched and company in seen_companies:
-                continue  # same company on a second line
-            seen_companies.add(company)
-            if stock["market"] == "US":
-                _bootstrap_history(conn, client, aq_limiter, stock["symbol"], scan)
-            progress.emit(activity=f"Downloading price charts for {stock['symbol']}")
-            price_frames, price_stats = prices.fetch(stock["yahoo"])
-            row = _row(stock, scan, info, store.iv_series(conn, stock["symbol"]), today,
-                       price_frames, price_stats, borrow.lookup(borrow_table, stock))
-            progress.emit(activity=f"Checking headlines for {stock['symbol']}")
-            headlines = news.fetch(stock["yahoo"])
-            row["news_headlines"] = headlines
-            row["news_checked_at"] = datetime.now(MARKET_TZ).isoformat(timespec="seconds")
-            row.update(explain.choose(row, headlines, as_of=date.fromisoformat(scan.get("quote_date") or run_date)))
-            row["watch_only"] = bool(stock.get("watch_only") or config.excluded_industry(info["industry"]))
-            rows.append(row)
-            progress.emit(completed=len(rows), activity=f"Enriched {stock['symbol']}: charts, short interest and news")
-            filled.update(v for v in VIEWS if _in_view(row, *v, hq_known=True))
-            if len(rows) % 10 == 0:
-                log(f"  {len(rows)} leaders enriched ({sum(lookups.values())} new lookups)")
+    stock_of = lambda scan: {**universe[scan["symbol"]], "market_cap_usd": caps[scan["symbol"]]}
+
+    def reusable(scan):
+        """The saved row this scan can keep: same session and IV (a settled row), or any row of this run's cache."""
+        saved = cached.get(scan["symbol"])
+        if saved is None:
+            saved = settled.get(scan["symbol"])
+            if saved is not None and saved.get("quote_date") != scan.get("quote_date"):
+                saved = None
+        return saved if saved and saved["iv30"] == round(scan["iv30"], 1) else None
+
+    def wanted(scan, counts=filled):
+        stock = stock_of(scan)
+        return stock["symbol"] in watched or (not stock.get("watch_only") and _still_needed(stock, counts))
+
+    with net.make_client() as client, ThreadPoolExecutor(max_workers=config.ENRICH_WORKERS) as pool:
+        jobs = {}  # symbol -> (future, cap band of a detail lookup or None for a headline check)
+        pending: Counter = Counter()  # detail lookups submitted but not yet consumed, so prefetching keeps to the budget
+
+        def drop(symbol):
+            if symbol in jobs:
+                future, band = jobs.pop(symbol)
+                future.cancel()
+                pending[band] -= band is not None
+
+        def take(symbol):
+            future, band = jobs.pop(symbol)
+            pending[band] -= band is not None
+            return future.result()
+
+        def prefetch(start):
+            """Keep the workers busy on the next likely leaders; anything later found unneeded is simply dropped.
+
+            Candidates already queued count as if they will fill their lists, so look-ahead stops as the lists fill up.
+            """
+            projected = filled.copy()
+            for scan in scans[start:start + config.ENRICH_LOOKAHEAD]:
+                symbol = scan["symbol"]
+                if not wanted(scan, projected if scan is not scans[start] else filled):
+                    continue
+                if symbol not in watched:
+                    projected.update(v for v in VIEWS if _in_view(stock_of(scan), *v, hq_known=False))
+                if symbol in jobs:
+                    continue
+                saved = reusable(scan)
+                if saved and symbol in cached:
+                    continue  # this run's own rows keep their headlines
+                stock = stock_of(scan)
+                if saved:
+                    jobs[symbol] = (pool.submit(_headlines, stock), None)
+                    continue
+                band = cap_band(stock["market_cap_usd"])
+                # The candidate at `start` has already passed the budget check; only look-ahead is held to it here.
+                if scan is not scans[start] and symbol not in watched and lookups[band] + pending[band] >= config.MAX_DETAIL_LOOKUPS:
+                    continue
+                pending[band] += 1
+                jobs[symbol] = (pool.submit(_enrich, client, aq_limiter, stock, scan, is_watched=symbol in watched,
+                                            bootstrap=stock["market"] == "US" and _needs_bootstrap(conn, symbol, scan)), band)
+
+        try:
+            for position, scan in enumerate(scans):
+                stock = stock_of(scan)
+                is_watched = stock["symbol"] in watched
+                if not wanted(scan):
+                    drop(scan["symbol"])
+                    continue
+                saved = reusable(scan)
+                if saved:
+                    company = norm_name(saved["name"])
+                    if is_watched or company not in seen_companies:
+                        row = saved
+                        if stock["symbol"] not in cached:
+                            prefetch(position)
+                            fresh = take(stock["symbol"])
+                            row = _reused(saved, stock, borrow_table, today)
+                            row.update(news_headlines=fresh["headlines"], news_checked_at=fresh["news_checked_at"])
+                            row.update(explain.choose(row, fresh["headlines"], as_of=date.fromisoformat(row["quote_date"])))
+                        rows.append(row)
+                        seen_companies.add(company)
+                        filled.update(v for v in VIEWS if _in_view(row, *v, hq_known=True))
+                        progress.emit(completed=len(rows), activity=f"Kept {stock['symbol']} from the last close; checked headlines")
+                    drop(stock["symbol"])
+                    continue
+                band = cap_band(stock["market_cap_usd"])
+                if not is_watched and lookups[band] >= config.MAX_DETAIL_LOOKUPS:
+                    drop(stock["symbol"])
+                    continue
+                progress.emit(activity=f"Downloading company details, charts and headlines for {stock['symbol']}")
+                prefetch(position)
+                fetched = take(stock["symbol"])
+                info = fetched["info"]
+                lookups[band] += 1
+                if fetched["rejected"]:
+                    continue
+                caps[stock["symbol"]] = _market_cap_usd(stock, info)
+                company = norm_name(info["name"] or stock["name"])
+                if not is_watched and company in seen_companies:
+                    continue  # same company on a second line
+                seen_companies.add(company)
+                if fetched["history"]:
+                    store.insert_history(conn, stock["symbol"], fetched["history"], "alphaquery")
+                price_frames, price_stats = fetched["prices"]
+                row = _row(stock, scan, info, store.iv_series(conn, stock["symbol"]), today,
+                           price_frames, price_stats, borrow.lookup(borrow_table, stock))
+                headlines = fetched["headlines"]
+                row["news_headlines"] = headlines
+                row["news_checked_at"] = fetched["news_checked_at"]
+                row.update(explain.choose(row, headlines, as_of=date.fromisoformat(scan.get("quote_date") or run_date)))
+                row["watch_only"] = bool(stock.get("watch_only") or config.excluded_industry(info["industry"]))
+                rows.append(row)
+                progress.emit(completed=len(rows), activity=f"Enriched {stock['symbol']}: charts, short interest and news")
+                filled.update(v for v in VIEWS if _in_view(row, *v, hq_known=True))
+                if len(rows) % 10 == 0:
+                    log(f"  {len(rows)} leaders enriched ({sum(lookups.values())} new lookups)")
+        finally:
+            for future, _ in jobs.values():
+                future.cancel()
 
     logos.apply(rows)
     quote_dates = Counter(r["quote_date"] for r in scans if r["quote_date"])
@@ -412,6 +550,8 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None) -
         "watchlist": sorted(watched),
         "rows": rows,
     }
+    if preliminary:
+        payload["preliminary"] = {"remaining": preliminary, "checked": len(scans)}
     conn.close()
     sentiment.enrich(payload)
     progress.emit(phase="render", activity="Building both dashboard tabs")

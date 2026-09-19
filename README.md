@@ -30,7 +30,7 @@ Developer build instructions are in [packaging/macos](packaging/macos/README.md)
 4. Your browser opens **the saved dashboard directly** at **http://127.0.0.1:8932/**. On the first launch, when no saved data exists, it shows the setup/download page instead. Dependency setup runs automatically. Use **Refresh data / download progress** above the dashboard whenever you want to update it.
 5. Click **Download market data**. The page shows the current stock/provider, completed and total quotes, measured companies per minute, elapsed time, scan ETA, failures, and provider retry/backoff messages. Enrichment shows completed companies without inventing a fixed total or ETA.
 
-A first download usually takes about an hour, depending on provider response times. Downloads default to **Manual**. Under **Download schedule & notifications**, choose **Automatic** for weekdays at **11:00 AM ET**, **4:30 PM ET (after close)**, or a custom Eastern time. Settings persist across restarts. The app must be running and the computer awake; reopening after the scheduled time catches up once that weekday. Weekends are skipped, but exchange holidays are not excluded. Failed scheduled runs are not automatically retried; use Resume. **Open saved dashboard** remains available while refreshing; the final report replaces the old one atomically. **Refresh market data** starts a fresh scan; **Resume unfinished download** reuses completed stocks from today and retries unfinished/failed requests, including after an interrupted refresh. Enrichment restarts when resuming. This is a local application, not a public web server; it binds only to `127.0.0.1`.
+A first download usually takes about 50 minutes, depending on provider response times. After that, each new close is downloaded in two passes: about 900 likely leaders first (large caps, TSX listings, your watchlist, and the 500 highest IVs of the last scan), then a preliminary dashboard after roughly 20 minutes, marked as such, while the remaining lower-IV stocks download; the complete dashboard replaces it about half an hour later. Downloads before the next close reuse what is already final and take a minute or two. Downloads default to **Manual**. Under **Download schedule & notifications**, choose **Automatic** for weekdays at **11:00 AM ET**, **4:30 PM ET (after close)**, or a custom Eastern time. Settings persist across restarts. The app must be running and the computer awake; reopening after the scheduled time catches up once that weekday. Weekends are skipped, but exchange holidays are not excluded. Failed scheduled runs are not automatically retried; use Resume. **Open saved dashboard** remains available while refreshing; the final report replaces the old one atomically. **Refresh market data** starts a fresh scan; **Resume unfinished download** reuses completed stocks from today and retries unfinished/failed requests, including after an interrupted refresh. Enrichment restarts when resuming. This is a local application, not a public web server; it binds only to `127.0.0.1`.
 
 Keep the launcher window open. Ctrl+C stops the server and its download process; relaunch and choose Resume to continue. Reopening the launcher while it is already running opens the existing app. A closed browser tab does not stop the download. The previous dashboard stays visible during updates; a completion banner links to the new report. Enable browser notifications from the schedule panel to receive an additional alert while a dashboard/progress tab is open. Browser permission is required.
 
@@ -42,7 +42,7 @@ The command-line examples below use Mac/Linux paths; on Windows replace `.venv/b
 
 ## Sentiment
 
-The macro panel can be collapsed from its title to a single line of the four readings; the dashboard remembers the choice. It shows dated VIX closes, Cboe equity/total/index put-call volume ratios, the AAII weekly bull–bear spread, and CNN Fear & Greed when its public website feed is accessible. Readings retain observation and retrieval dates. Sources are cached for six hours; failed requests retain the last good observation, explicitly marked as cached or stale. Stale inputs are excluded (4 calendar days for daily Cboe data, 10 for AAII, 2 for CNN). AAII and CNN can block automated requests; the app does not bypass those restrictions. For AAII, you enter each week by hand (below). For CNN, a separately labelled replica (below) stands in when CNN has no fresh reading. The panel needs at least three fresh readings to describe an overall tilt and explains overlapping CNN inputs.
+The macro panel can be collapsed from its title to a single line of the four readings; the dashboard remembers the choice. It shows dated VIX closes, Cboe equity/total/index put-call volume ratios, the AAII weekly bull–bear spread, and CNN Fear & Greed when its public website feed is accessible. Readings retain observation and retrieval dates. Sources are cached for six hours, and a reading of the latest close is kept until the next session opens (news and social posts excepted); failed requests retain the last good observation, explicitly marked as cached or stale. Stale inputs are excluded (4 calendar days for daily Cboe data, 10 for AAII, 2 for CNN). AAII and CNN can block automated requests; the app does not bypass those restrictions. For AAII, you enter each week by hand (below). For CNN, a separately labelled replica (below) stands in when CNN has no fresh reading. The panel needs at least three fresh readings to describe an overall tilt and explains overlapping CNN inputs.
 
 **AAII weekly entry.** AAII publishes its survey every Thursday, and the app does not fetch it. When a newer week is out, the AAII card shows a small “New week out” note. Click it and copy the three percentages from [AAII's results page](https://www.aaii.com/sentimentsurvey) into the card. The week is saved on this computer in `data/sentiment/aaii-manual.json` and shows immediately, with no data refresh needed. It needs the dashboard opened through the StocksHighIV app. The card uses whichever is newest: AAII's page, the week you entered, an AAII spreadsheet (`sentiment.xls`, `.xlsx` or `.csv`) you place in `data/imports`, or AAII's weekly history since 1987, bundled in `highiv/aaii_history.csv` for personal use. Like any AAII reading, an entry is excluded once it is more than 10 days old.
 
@@ -68,7 +68,7 @@ Checked against CNN's published history on September 18, 2026:
 
 The widest component gaps come from put/call, where CNN's series matches no public Cboe ratio exactly, and junk bond demand, where CNN's feed carries one-day spikes around bond ETF payout dates that the replica does not copy.
 
-Each replica refresh downloads about four years of daily bars for roughly 1,400 NYSE stocks, which takes about a minute. The first few refreshes also backfill about 650 sessions of Cboe put/call history, stored in `data/sentiment/put_call_history.json`. The backfill runs up to four requests at once, stays within the scan's Cboe rate limit, and stops after three minutes per refresh. Until the history is complete, the replica runs on six components and says so. To re-check agreement with CNN's published history (needs CNN's feed and a complete Cboe history):
+Each replica refresh downloads about four years of daily bars for roughly 1,400 NYSE stocks, which takes about 30 seconds, at most once per close once the Cboe history is complete. The first few refreshes also backfill about 650 sessions of Cboe put/call history, stored in `data/sentiment/put_call_history.json`. The backfill runs up to four requests at once, stays within the scan's Cboe rate limit, and stops after three minutes per refresh. Until the history is complete, the replica runs on six components and says so. To re-check agreement with CNN's published history (needs CNN's feed and a complete Cboe history):
 
 ```sh
 python -m highiv fear-greed-check
@@ -110,15 +110,15 @@ cd ~/StocksHighIV
 ```
 
 ```bash
-.venv/bin/python -m highiv run      # scan + build (~1 hour)
+.venv/bin/python -m highiv run      # scan + build; after the first run: likely leaders, a preliminary dashboard (~20 min), then the rest
 ```
 
 ```bash
-.venv/bin/python -m highiv scan     # IV for every stock only (~45 min, almost all of it waiting on Cboe's rate limit); resumable
+.venv/bin/python -m highiv scan     # IV for every stock only (~45 min after each new close, almost all of it waiting on Cboe's rate limit); resumable
 ```
 
 ```bash
-.venv/bin/python -m highiv build    # rank, add float/short/price/earnings data, write the dashboard (~20 min)
+.venv/bin/python -m highiv build    # rank, add float/short/price/earnings data, write the dashboard (~4 min; ~1 min for the same close)
 ```
 
 ```bash
@@ -126,7 +126,12 @@ cd ~/StocksHighIV
 ```
 
 Scans resume completed symbols and retry failed requests. A valid response with no usable IV
-counts as completed. To replace quotes from an earlier run on the same day (for example, after
+counts as completed. Quotes downloaded after a session settled (4:30 PM ET) cannot change until the next
+session trades, so later runs copy them instead of asking Cboe again: an evening, weekend or next-morning
+refresh takes seconds. One Cboe request for SPY tells whether a new session has traded, which also covers
+exchange holidays; Montréal Exchange quotes follow the weekday calendar. Likewise, the build keeps leaders
+enriched after the same close (refreshing only headlines, borrow terms and the earnings countdown) and
+enriches new ones four at a time. To replace quotes from an earlier run on the same day (for example, after
 the close following a morning scan), use:
 
 ```bash

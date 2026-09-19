@@ -57,6 +57,9 @@ CBOE_MAX_PER_MINUTE = 55
 MX_MIN_INTERVAL_S = 1.0
 ALPHAQUERY_MIN_INTERVAL_S = 1.0
 YAHOO_MIN_INTERVAL_S = 0.25
+PRIORITY_TOP = 500             # mid caps by last IV downloaded before the preliminary dashboard (top 100 came from within ~320)
+ENRICH_WORKERS = 4             # leaders enriched at once; each worker still pauses between Yahoo requests
+ENRICH_LOOKAHEAD = 8           # candidates prepared ahead of the ranking, so workers never wait on it
 
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "

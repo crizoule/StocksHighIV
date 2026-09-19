@@ -897,6 +897,7 @@
       ["Updated", updated],
       ["Universe", `${nf0.format(U.us)} US · ${nf0.format(U.tsx_only)} TSX-only`],
       ["With IV", nf0.format(U.with_iv)],
+      ...(DATA.preliminary ? [["Status", `Preliminary · ${nf0.format(DATA.preliminary.remaining)} lower-IV stocks still downloading; the complete dashboard replaces this one when they finish`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
     $("dist-note").textContent = `IV30 across ${nf0.format(U.with_iv)} ${CAP_LABEL[state.cap]} stocks with options`;
     const h = S.squeeze_high, e = S.squeeze_elevated;

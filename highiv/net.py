@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
@@ -41,8 +42,13 @@ class RateLimiter:
         self.window = window
         self.min_interval = min_interval
         self._calls: deque[float] = deque()
+        self._lock = threading.Lock()  # shared by worker threads: waits queue up instead of racing
 
     def wait(self) -> None:
+        with self._lock:
+            self._wait()
+
+    def _wait(self) -> None:
         now = time.monotonic()
         while self._calls and now - self._calls[0] >= self.window:
             self._calls.popleft()

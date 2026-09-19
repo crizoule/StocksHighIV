@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS scans (
     price       REAL,
     quote_date  TEXT,           -- trading session the quote belongs to
     status      TEXT NOT NULL DEFAULT 'error', -- ok | no_iv | error | pending
+    fetched_at  TEXT,           -- UTC time of the download; reused copies keep the original
     PRIMARY KEY (run_date, symbol)
 );
 CREATE TABLE IF NOT EXISTS iv_history (
@@ -40,6 +41,9 @@ def connect() -> sqlite3.Connection:
         conn.execute("ALTER TABLE scans ADD COLUMN status TEXT NOT NULL DEFAULT 'error'")
         conn.execute("UPDATE scans SET status = 'ok' WHERE iv30 IS NOT NULL")
         conn.commit()
+    if "fetched_at" not in columns:
+        conn.execute("ALTER TABLE scans ADD COLUMN fetched_at TEXT")  # older rows are never treated as final
+        conn.commit()
     return conn
 
 
@@ -50,14 +54,14 @@ def scanned_symbols(conn: sqlite3.Connection, run_date: str) -> set[str]:
 
 
 def record_scan(conn: sqlite3.Connection, run_date: str, symbol: str, source: str,
-                result: dict | None, *, failed: bool = False) -> None:
+                result: dict | None, *, failed: bool = False, fetched_at: str | None = None) -> None:
     r = result or {}
     conn.execute(
         "INSERT OR REPLACE INTO scans "
-        "(run_date, symbol, source, iv30, iv30_change, price, quote_date, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "(run_date, symbol, source, iv30, iv30_change, price, quote_date, status, fetched_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (run_date, symbol, source, r.get("iv30"), r.get("iv30_change"), r.get("price"), r.get("quote_date"),
-         "error" if failed else "ok" if r.get("iv30") else "no_iv"),
+         "error" if failed else "ok" if r.get("iv30") else "no_iv", fetched_at),
     )
     if r.get("iv30") and r.get("quote_date"):
         conn.execute(
@@ -65,6 +69,49 @@ def record_scan(conn: sqlite3.Connection, run_date: str, symbol: str, source: st
             (symbol, r["quote_date"], r["iv30"], source),
         )
     conn.commit()
+
+
+def reopen_unsettled(conn: sqlite3.Connection, run_date: str, settled: dict[str, str | None]) -> None:
+    """Mark a run's quotes for download again, except those fetched after their market last closed."""
+    conn.execute("UPDATE scans SET status = 'pending' WHERE run_date = ?", (run_date,))
+    for source, since in settled.items():
+        if since:
+            conn.execute("UPDATE scans SET status = CASE WHEN iv30 IS NULL THEN 'no_iv' ELSE 'ok' END "
+                         "WHERE run_date = ? AND source = ? AND fetched_at >= ? AND status = 'pending'", (run_date, source, since))
+    conn.commit()
+
+
+def reuse_settled(conn: sqlite3.Connection, run_date: str, symbols: dict[str, str], settled: dict[str, str | None]) -> set[str]:
+    """Copy each symbol's newest quote fetched after its market last closed into this run; returns the symbols copied.
+
+    `symbols` maps symbol to source; `settled` maps source to the earliest fetch time (UTC ISO) that is still final.
+    """
+    reused = set()
+    for source, since in settled.items():
+        wanted = [symbol for symbol, s in symbols.items() if s == source]
+        if not since or not wanted:
+            continue
+        rows = conn.execute(
+            "SELECT symbol, iv30, iv30_change, price, quote_date, status, fetched_at FROM scans "
+            "WHERE source = ? AND status IN ('ok', 'no_iv') AND fetched_at >= ? AND run_date < ? "
+            "ORDER BY fetched_at", (source, since, run_date)).fetchall()
+        newest = {row[0]: row for row in rows}  # later fetches win
+        copies = [(run_date, symbol, source, *newest[symbol][1:]) for symbol in wanted if symbol in newest]
+        conn.executemany(
+            "INSERT OR REPLACE INTO scans (run_date, symbol, source, iv30, iv30_change, price, quote_date, status, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", copies)
+        reused.update(row[1] for row in copies)
+    conn.commit()
+    return reused
+
+
+def previous_iv(conn: sqlite3.Connection, run_date: str) -> dict[str, float | None]:
+    """Each symbol's IV30 from its latest completed check before this run; None when it had no usable IV."""
+    rows = conn.execute(
+        "SELECT symbol, iv30 FROM scans s WHERE run_date < ? AND status IN ('ok', 'no_iv') AND run_date = "
+        "(SELECT MAX(run_date) FROM scans t WHERE t.symbol = s.symbol AND t.run_date < ? AND t.status IN ('ok', 'no_iv'))",
+        (run_date, run_date))
+    return dict(rows.fetchall())
 
 
 def scan_results(conn: sqlite3.Connection, run_date: str) -> list[dict]:

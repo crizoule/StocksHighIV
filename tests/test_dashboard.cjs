@@ -30,6 +30,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     watchlist: options.watchlist || [],
     universe_by_cap: options.stats,
     macro_sentiment: options.macro,
+    preliminary: options.preliminary,
   };
   const elements = new Map();
   function element(id) {
@@ -209,6 +210,12 @@ test('funding and short-position timestamps remain distinct from report generati
   assert.match(collapsed, /Fetched Sep 16, 2026, 1:15 PM ET/);
   assert.match(collapsed, /1M shares short/);
   assert.doesNotMatch(collapsed, /Fetched Sep 18/);
+});
+
+test('a preliminary dashboard says the remaining stocks are still downloading', () => {
+  assert.doesNotMatch(renderEarnings(null).element('session').innerHTML, /Preliminary/);
+  const { element } = renderEarnings(null, {}, { preliminary: { remaining: 1520, checked: 740 } });
+  assert.match(element('session').innerHTML, /Preliminary · 1,520 lower-IV stocks still downloading/);
 });
 
 test('legacy snapshots do not invent retrieval dates', () => {
