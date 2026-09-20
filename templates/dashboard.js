@@ -26,7 +26,7 @@
     if (saved && ["all", "us", "tsx"].includes(saved.market)) state.market = saved.market;
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
-    if (saved && ["aaii", "vix", "put_call", "fear_greed"].includes(saved.mseries)) state.mseries = saved.mseries;
+    if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot"].includes(saved.mseries)) state.mseries = saved.mseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
     if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; }
   } catch (err) { /* storage unavailable: defaults apply */ }
@@ -144,6 +144,10 @@
   };
   const replicaParts = parts => (parts || []).length ? `<ul class="replica-parts">${parts.map(p =>
     `<li>${esc(p.name)} · ${isNum(p.score) ? `${nf1.format(p.score)} ${esc(p.rating || "")}` : "Unavailable"}<span>${esc(isNum(p.score) ? p.reading : p.detail || "No fresh input")}</span></li>`).join("")}</ul>` : "";
+  const contracts = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf0.format(Math.abs(v))}`;
+  const cotIndex = (v) => isNum(v) ? ` · index ${nf0.format(v)}` : "";
+  const cotRows = (c) => (c.groups || []).map((g, i) => `<p class="sentiment-meta">${i ? `${esc(g.name)} · asset managers` : "Asset managers"} ` +
+    `${esc(contracts(g.asset_managers))}${esc(cotIndex(g.asset_managers_index))} · leveraged funds ${esc(contracts(g.leveraged))}${esc(cotIndex(g.leveraged_index))}</p>`).join("");
   const renamed = (name) => name === "CNN Fear & Greed" ? "Fear & Greed" : name;  // reports saved before 1.6.0
   const renderMacro = () => {
     const defaults = [
@@ -151,6 +155,7 @@
       {key:"put_call", name:"Put/call ratios", url:"https://www.cboe.com/us/options/market_statistics/daily/"},
       {key:"aaii", name:"AAII sentiment", url:"https://www.aaii.com/sentimentsurvey"},
       {key:"cnn", name:"Fear & Greed", url:"https://www.cnn.com/markets/fear-and-greed"},
+      {key:"cot", name:"COT positioning", url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm"},
     ];
     const cards = defaults.map(d => ({...d, ...(DATA.macro_sentiment?.cards || []).find(c => c.key === d.key)}))
       .map(c => ({...c, name: renamed(c.name), usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
@@ -159,14 +164,14 @@
     $("macro-body").hidden = !state.macroOpen;
     $("macro-oneline").hidden = state.macroOpen;
     $("macro-oneline").innerHTML = cards.map(c => {
-      const label = {vix: "VIX", put_call: "Put/call", aaii: "AAII", cnn: c.replica_of ? "Fear & Greed (replica)" : "Fear & Greed"}[c.key];
+      const label = {vix: "VIX", put_call: "Put/call", aaii: "AAII", cnn: c.replica_of ? "Fear & Greed (replica)" : "Fear & Greed", cot: "COT"}[c.key];
       const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
       return `<span><b>${esc(label)}</b> ${c.usable ? `${esc(c.reading)} · ${esc(c.signal)}` : stale ? "stale" : "—"}</span>`;
     }).join("");
     const available = cards.filter(c => c.usable);
     const positive = available.filter(c => c.direction > 0).length, negative = available.filter(c => c.direction < 0).length;
     $("macro-summary").textContent = available.length < 3 ? "Limited coverage" : positive && negative ? "Mixed signals" : positive >= 2 ? "Risk appetite leaning positive" : negative >= 2 ? "Cautious mood" : "Mixed signals";
-    $("macro-note").textContent = `${available.length}/4 fresh readings · Each source keeps its own observation date. ${DATA.macro_sentiment?.checked_at ? `Sources checked ${fetchedLabel(DATA.macro_sentiment.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect sentiment."} This panel is independent of the IV scan session.`;
+    $("macro-note").textContent = `${available.length}/${cards.length} fresh readings · Each source keeps its own observation date. ${DATA.macro_sentiment?.checked_at ? `Sources checked ${fetchedLabel(DATA.macro_sentiment.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect sentiment."} This panel is independent of the IV scan session.`;
     $("macro-cards").innerHTML = cards.map(c => {
       const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
       const tone = !c.usable ? "unknown" : c.direction > 0 ? "positive" : c.direction < 0 ? "negative" : "mixed";
@@ -178,6 +183,7 @@
         (c.key === "aaii" ? aaiiRows(c) : "") +
         (c.replica_of ? `<p class="sentiment-meta">Not CNN's reading · CNN feed ${c.cnn_status === "stale" && c.cnn_as_of ? `stale since ${esc(c.cnn_as_of)}` : "unavailable"}</p>` : "") +
         (replica && c.usable ? `<p class="sentiment-meta">Replica ${nf1.format(replica.value)} · ${replica.value >= c.value ? "+" : "−"}${nf1.format(Math.abs(replica.value - c.value))} vs CNN</p>` : "") +
+        (c.key === "cot" ? cotRows(c) : "") +
         (c.ratios ? `<p class="sentiment-meta">Total ${isNum(c.ratios.total) ? nf2.format(c.ratios.total) : "—"} · Index ${isNum(c.ratios.index) ? nf2.format(c.ratios.index) : "—"}</p>` : "") +
         `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No verified reading in this report. The source may block automated access; no substitute value is estimated.")}</p>` +
         (c.key === "aaii" ? `<p>AAII blocks automated access, so the app does not fetch this survey. Each Thursday, copy the new week's three percentages from ${sentimentLink(c.url, "AAII's results page")} into this card. <button type="button" class="link-button" data-aaii-edit>Enter or correct a week</button></p>` : "") +
@@ -202,6 +208,7 @@
     vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
+    cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: net flat" },
   };
   const monthsBack = (t, years, months) => {
     if (years === undefined) return MACRO_EARLIEST;

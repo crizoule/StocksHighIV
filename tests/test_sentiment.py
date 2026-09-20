@@ -71,7 +71,7 @@ class MacroTests(unittest.TestCase):
         sources = {"macro": {"vix": {"status": "cached", "value": 15, "as_of": "2026-09-01"},
                               "aaii": {"status": "ok", "value": -20, "as_of": "2026-09-09"}}}
         cards = evaluate(sources=sources)["macro_sentiment"]["cards"]
-        self.assertEqual([c["status"] for c in cards], ["stale", "unavailable", "ok", "unavailable"])
+        self.assertEqual([c["status"] for c in cards], ["stale", "unavailable", "ok", "unavailable", "unavailable"])
         self.assertEqual(cards[0]["as_of"], "2026-09-01")
 
     def test_replica_is_a_cross_check_and_stands_in_only_without_a_fresh_cnn_reading(self):
@@ -238,6 +238,30 @@ class MacroTests(unittest.TestCase):
             self.assertEqual(s.cached_read("macro-vix", fetch, at(2026, 9, 20, 12), sessions=True)["value"], 15)
             self.assertEqual(s.cached_read("macro-vix", fetch, at(2026, 9, 20, 12))["value"], 16)  # news and social: expiry only
             self.assertEqual(len(fetched), 1)
+
+    def test_cot_reads_asset_manager_positioning_with_a_three_year_index(self):
+        start = date(2023, 9, 19)
+        def rows(code, asset_net, lev_net=-50):
+            return [{"cftc_contract_market_code": code, "report_date_as_yyyy_mm_dd": f"{start + timedelta(weeks=i)}T00:00:00.000",
+                     "open_interest_all": "1000", "asset_mgr_positions_long": str(100 + max(net, 0)),
+                     "asset_mgr_positions_short": str(100 + max(-net, 0)),
+                     "lev_money_positions_long": "100", "lev_money_positions_short": str(100 - lev_net)} for i, net in enumerate(asset_net)]
+        weeks = s.COT_LOOKBACK
+        data = rows("13874A", [i for i in range(weeks - 1)] + [400]) + rows("1170E1", [-i for i in range(weeks)])
+        data.append({"cftc_contract_market_code": "13874A", "report_date_as_yyyy_mm_dd": "2030-01-01T00:00:00.000"})  # malformed: skipped
+        item = s.parse_cot(data, date(2026, 9, 19))
+        self.assertEqual(item["as_of"], (start + timedelta(weeks=weeks - 1)).isoformat())
+        self.assertEqual((item["value"], item["reading"], item["index"]), (40.0, "+40.0% of OI", 100))
+        self.assertEqual((item["signal"], item["direction"]), ("Institutions heavily long", 1))
+        spx, vix = item["groups"]
+        self.assertEqual((spx["leveraged"], spx["leveraged_index"]), (-50, 0))  # never above its own past: ranks 0
+        self.assertEqual((vix["name"], vix["asset_managers"], vix["asset_managers_index"]), ("VIX futures", -155, 0))
+        self.assertEqual(len(item["history"]), weeks)
+        self.assertNotIn("history", spx)
+        with self.assertRaisesRegex(ValueError, "Too little COT history"):
+            s.parse_cot(data[:40], date(2026, 9, 19))
+        with self.assertRaisesRegex(ValueError, "Too little COT history"):  # weeks after today are never read
+            s.parse_cot(data, start + timedelta(weeks=weeks - 2))
 
     def test_cache_failure_never_replaces_fetch_time_with_now(self):
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):

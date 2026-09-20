@@ -35,7 +35,12 @@ MACRO = {
     "put_call": ("Put/call ratios", PC_URL, 4),
     "aaii": ("AAII sentiment", AAII_URL, 10),
     "cnn": ("Fear & Greed", CNN_PAGE, 2),
+    "cot": ("COT positioning", "https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm", 14),  # Tuesday data, out Friday
 }
+# CFTC's public reporting API: Traders in Financial Futures, futures only. No key; one request returns every week since 2006.
+COT_URL = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
+COT_CONTRACTS = {"13874A": "E-mini S&P 500", "1170E1": "VIX futures"}
+COT_LOOKBACK = 156  # weeks: the usual three-year "COT index" window
 HISTORY_DAYS = 3660               # the chart keeps daily points for 10 years, weekly points before that
 EARLIEST = date(1987, 7, 1)       # AAII's survey starts in July 1987, the chart's longest range
 PUT_CALL_ARCHIVES = (             # Cboe's discontinued daily files; the newer one wins where they overlap
@@ -438,6 +443,65 @@ def put_call_series(archive=()):
     return [[d.isoformat(), round(v, 3)] for d, v in thinned(averaged, averaged[-1][0] - timedelta(days=HISTORY_DAYS))]
 
 
+def cot_index(values, current):
+    """Percentile of the latest reading within the trailing window (the "COT index"), 0–100; None without a full window."""
+    window = values[-COT_LOOKBACK:]
+    if len(window) < COT_LOOKBACK:
+        return None
+    return round(sum(v < current for v in window[:-1]) / (len(window) - 1) * 100)
+
+
+def parse_cot(rows, today):
+    """Asset-manager and leveraged-fund net positions from CFTC rows; the S&P 500 E-mini leads, VIX futures in the details."""
+    weeks = {code: {} for code in COT_CONTRACTS}
+    for row in rows:
+        try:
+            code, when = row["cftc_contract_market_code"], date.fromisoformat(row["report_date_as_yyyy_mm_dd"][:10])
+            interest = number(row["open_interest_all"], 1)
+            lev = number(row["lev_money_positions_long"], 0) - number(row["lev_money_positions_short"], 0)
+            asset = number(row["asset_mgr_positions_long"], 0) - number(row["asset_mgr_positions_short"], 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if code in weeks and when <= today:
+            weeks[code][when] = (asset, lev, interest)
+    groups = {}
+    for code, name in COT_CONTRACTS.items():
+        days = sorted(weeks[code])
+        if len(days) < COT_LOOKBACK:
+            raise ValueError(f"Too little COT history for {name}")
+        asset = [weeks[code][d][0] for d in days]
+        lev = [weeks[code][d][1] for d in days]
+        last, (managers, net, interest) = days[-1], weeks[code][days[-1]]
+        groups[code] = dict(name=name, as_of=last.isoformat(), asset_managers=round(managers), asset_managers_index=cot_index(asset, managers),
+                            leveraged=round(net), leveraged_index=cot_index(lev, net), open_interest=round(interest),
+                            asset_managers_pct_oi=round(managers / interest * 100, 1),
+                            history=[[d.isoformat(), round(weeks[code][d][0] / weeks[code][d][2] * 100, 2)] for d in days])
+    spx = groups.pop("13874A")
+    index, share = spx["asset_managers_index"], spx["asset_managers_pct_oi"]
+    return dict(as_of=spx["as_of"], value=share, reading=f"{share:+.1f}% of OI".replace("-", "−"),
+                index=index, groups=[{k: v for k, v in spx.items() if k != "history"},
+                                     *({k: v for k, v in g.items() if k != "history"} for g in groups.values())],
+                history=spx["history"],
+                signal="Institutions heavily long" if index >= 80 else "Institutions lightly long" if index <= 20 else "Typical positioning",
+                direction=1 if index >= 80 else -1 if index <= 20 else 0,
+                detail=("CFTC Traders in Financial Futures, E-mini S&P 500 futures only. Reading: asset managers' (pension funds, "
+                        "mutual funds, insurers) net contracts as a share of open interest. The COT index ranks that net position within "
+                        "the last three years (0 = least long, 100 = most long); ≥80 and ≤20 mark crowded or light positioning, which "
+                        "traders often read contrarian at extremes. Asset managers' net position has moved with the index week to week, "
+                        "while leveraged funds' has moved against it: much of theirs hedges cash holdings or arbitrages futures against "
+                        "stocks, so it is shown for reference only. Positions are as of Tuesday and published the following Friday. "
+                        "This is positioning, not a survey of opinion."))
+
+
+def fetch_cot(client, today):
+    codes = ", ".join(f"'{code}'" for code in COT_CONTRACTS)
+    fields = ("report_date_as_yyyy_mm_dd, cftc_contract_market_code, open_interest_all, lev_money_positions_long, "
+              "lev_money_positions_short, asset_mgr_positions_long, asset_mgr_positions_short")
+    text = request_text(client, COT_URL, params={"$select": fields, "$where": f"cftc_contract_market_code in ({codes})",
+                                                  "$order": "report_date_as_yyyy_mm_dd", "$limit": 10000})
+    return parse_cot(json.loads(text), today)
+
+
 def check_fear_greed(now=None, years=3):
     """Compare the replica with CNN's published history; needs CNN's feed and a filled Cboe history."""
     now = now or datetime.now(timezone.utc)
@@ -496,7 +560,8 @@ def collect(rows, *, now=None):
         parsers = {"vix": lambda: parse_vix(request_text(client, VIX_URL), today),
                    "put_call": lambda: parse_put_call(request_text(client, PC_URL), today),
                    "aaii": lambda: parse_aaii(request_text(client, AAII_URL), today),
-                   "cnn": lambda: fetch_cnn(client, today)}
+                   "cnn": lambda: fetch_cnn(client, today),
+                   "cot": lambda: fetch_cot(client, today)}
         for key, fetch in parsers.items():
             def macro_fetch(fetch=fetch):
                 item = fetch()
@@ -582,6 +647,8 @@ def chart_history(macro, history):
         "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics",
                          frequency="daily", points=history.get("put_call") or []),
         "fear_greed": {**fear, "unit": "", "frequency": "daily"},
+        "cot": dict(name="COT: asset managers' net, % of open interest", unit="%", source="CFTC Traders in Financial Futures · E-mini S&P 500",
+                    frequency="weekly", points=(macro.get("cot") or {}).get("history") or []),
     }}
 
 
