@@ -41,9 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''MACD is now drawn the conventional way. The chart adds histogram bars between the MACD and signal lines, green above zero and red below, faded when a bar is shorter than the one before it, so a closing gap reads at a glance. Bars appear while each session has room for one, about a year of history; longer ranges keep the two lines alone.
+    notes = '''The MACD histogram now stays on the long ranges. Below one pixel per session the bars used to disappear, which started at the 5-year range; they now group into weekly, monthly or quarterly bars, each keeping its last session's value, the way a weekly chart does, and the pane label says which. The MACD and signal lines stay at daily detail at every range.
 
-The signal line is now solid orange instead of a dashed copy of the MACD line, both on the S&P 500 chart and on the per-stock MACD in expanded rows. No data changes, so no extra download.
+No data changes, so no extra download.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
