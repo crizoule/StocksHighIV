@@ -344,7 +344,8 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
     cot: {name: "COT: asset managers' net, % of open interest", frequency: 'weekly', source: 'CFTC', points: spx.filter((_, i) => i % 5 === 1).map(([d, v]) => [d, (6000 - v) / 100])},
     rsi: {name: 'RSI 14', frequency: 'daily', source: 'Computed from S&P 500 daily closes', points: spx.map(([d, v]) => [d, 50 + (v % 40) / 4])},
     macd: {name: 'MACD 12/26/9, % of index', frequency: 'daily', source: 'Computed from S&P 500 daily closes',
-           points: spx.map(([d, v]) => [d, (v % 20) / 10 - 1]), signal: spx.map(([d, v]) => [d, (v % 20) / 12 - 1])},
+           points: spx.map(([d, v]) => [d, (v % 20) / 10 - 1]),
+           signal: spx.map(([d, v], i) => [d, (v % 20) / 10 - 1 + ((i % 7) - 3) * 0.05])},  // histogram crosses zero
   }};
   const app = renderEarnings(null, {}, {macro: {cards: [], history}, saved: {mseries: 'vix', mrange: '1Y'}});
   const plot = () => app.element('macro-plot').innerHTML, table = () => app.element('macro-windows').innerHTML;
@@ -364,6 +365,9 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.equal((plot().match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 2);  // the line breaks at the gap
   app.click('macro-series-seg', 'mseries', 'macd');
   assert.match(plot(), /class="line-ind2" d="M/);  // the signal line shares the pane
+  assert.match(plot(), /class="hist hist-(up|down)( hist-fading)?" x=/);  // histogram bars between the two lines
+  assert.match(plot(), /class="hist hist-up hist-fading"/);  // a bar shorter than the one before it is faint
+  assert.match(plot(), /class="hist hist-down"/);
   assert.match(plot(), /MACD<tspan class="ref-label"> · line at 0: MACD crosses its signal<\/tspan>/);
   assert.match(app.element('macro-legend').innerHTML, /key-ind2[^>]*><\/i>signal [+−][\d.]+%/);
   app.click('macro-series-seg', 'mseries', 'rsi');

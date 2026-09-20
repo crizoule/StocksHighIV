@@ -209,7 +209,7 @@
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
     rsi: { short: "RSI 14", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: gains balance losses", derived: true },
-    macd: { short: "MACD", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", derived: true },
+    macd: { short: "MACD", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", histogram: true, derived: true },
     cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: net flat" },
   };
   const monthsBack = (t, years, months) => {
@@ -324,9 +324,11 @@
     };
     const path = (points, y) => points.map((p, i) => `${i && p.t - points[i - 1].t <= MACRO_GAP ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
     const top2 = top + h1 + gap;
-    // MACD's signal line shares the pane, so the scale covers both lines.
+    // MACD's signal line shares the pane, so the scale covers both lines and the bars between them.
     const second = meta.second ? series.signal.filter((p) => p.t >= start && p.t <= end) : [];
-    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind.concat(second), top2, h2, meta.ref) : null;
+    const signalAt = new Map(second.map((p) => [p.t, p.v]));
+    const bars = meta.histogram ? w.ind.filter((p) => signalAt.has(p.t)).map((p) => ({ t: p.t, v: p.v - signalAt.get(p.t) })) : [];
+    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind.concat(second, bars), top2, h2, meta.ref) : null;
     const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
       `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
     // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
@@ -343,6 +345,14 @@
     const anchor = (t) => x(t) < m.left + 24 ? "start" : x(t) > W - m.right - 24 ? "end" : "middle";
     const labels = [];  // skip labels that would touch on narrow screens (about 7px per mono character)
     for (const t of xTicks) if (!labels.length || x(t) - x(labels[labels.length - 1]) >= (xFmt(t).length + 2) * 7) labels.push(t);
+    // Bars are drawn only while each session has room for one; on long ranges the two lines carry the picture.
+    const barWidth = Math.min(8, ((W - m.left - m.right) / Math.max(bars.length - 1, 1)) * 0.62);
+    const histogram = I && barWidth >= 1 ? bars.map((b, i) => {
+      const shrinking = i && Math.abs(b.v) < Math.abs(bars[i - 1].v);
+      const y0 = I.y(0), y1 = I.y(b.v);
+      return `<rect class="hist ${b.v >= 0 ? "hist-up" : "hist-down"}${shrinking ? " hist-fading" : ""}" x="${(x(b.t) - barWidth / 2).toFixed(1)}" ` +
+        `y="${Math.min(y0, y1).toFixed(1)}" width="${barWidth.toFixed(2)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}"/>`;
+    }).join("") : "";
     const markers = I && w.ind.length <= 60 && series.frequency === "weekly"
       ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
     $("macro-plot").innerHTML =
@@ -351,7 +361,7 @@
       `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${state.mlog ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
       (I ? grid(I, m.left - 8) +
         (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
-        (second.length ? `<path class="line-ind2" d="${path(second, I.y)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
+        histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
         : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
       `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}</tspan>` : ""}</text>` +
       labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
@@ -669,7 +679,9 @@
     const bars = histogram.map((h, i) => {
       if (!isNum(h)) return "";
       const height = Math.max(0.6, Math.abs(y(h) - y(0)));
-      return `<rect class="${h >= 0 ? "bar-up" : "bar-down"}" x="${(x(i) - width / 2).toFixed(1)}" ` +
+      // A bar shorter than the one before it is drawn faint: the gap to the signal line is closing.
+      const fading = i && isNum(histogram[i - 1]) && Math.abs(h) < Math.abs(histogram[i - 1]) ? " bar-fading" : "";
+      return `<rect class="${h >= 0 ? "bar-up" : "bar-down"}${fading}" x="${(x(i) - width / 2).toFixed(1)}" ` +
         `y="${Math.min(y(h), y(0)).toFixed(1)}" width="${width.toFixed(1)}" height="${height.toFixed(1)}"/>`;
     }).join("");
     const [line, sig] = pairs[pairs.length - 1];
