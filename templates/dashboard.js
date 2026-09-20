@@ -345,10 +345,16 @@
     const anchor = (t) => x(t) < m.left + 24 ? "start" : x(t) > W - m.right - 24 ? "end" : "middle";
     const labels = [];  // skip labels that would touch on narrow screens (about 7px per mono character)
     for (const t of xTicks) if (!labels.length || x(t) - x(labels[labels.length - 1]) >= (xFmt(t).length + 2) * 7) labels.push(t);
-    // Bars are drawn only while each session has room for one; on long ranges the two lines carry the picture.
-    const barWidth = Math.min(8, ((W - m.left - m.right) / Math.max(bars.length - 1, 1)) * 0.62);
-    const histogram = I && barWidth >= 1 ? bars.map((b, i) => {
-      const shrinking = i && Math.abs(b.v) < Math.abs(bars[i - 1].v);
+    // Every session gets a bar while there is room; on longer ranges bars group into periods, each keeping its
+    // last session's value, the way a weekly or monthly chart does. The lines stay at full daily detail.
+    const room = Math.max(1, Math.floor((W - m.left - m.right) / 2.4));
+    const perBar = Math.max(1, Math.ceil(bars.length / room));
+    const grouped = perBar === 1 ? bars : bars.filter((_, i) => i % perBar === perBar - 1 || i === bars.length - 1);
+    const barWidth = Math.max(1, Math.min(8, ((W - m.left - m.right) / Math.max(grouped.length, 1)) * 0.62));
+    const barSpan = grouped.length > 1 ? (grouped[grouped.length - 1].t - grouped[0].t) / (grouped.length - 1) / 864e5 : 0;
+    const barPeriod = perBar === 1 ? "" : barSpan <= 10 ? "weekly bars" : barSpan <= 45 ? "monthly bars" : barSpan <= 120 ? "quarterly bars" : "yearly bars";
+    const histogram = I ? grouped.map((b, i) => {
+      const shrinking = i && Math.abs(b.v) < Math.abs(grouped[i - 1].v);
       const y0 = I.y(0), y1 = I.y(b.v);
       return `<rect class="hist ${b.v >= 0 ? "hist-up" : "hist-down"}${shrinking ? " hist-fading" : ""}" x="${(x(b.t) - barWidth / 2).toFixed(1)}" ` +
         `y="${Math.min(y0, y1).toFixed(1)}" width="${barWidth.toFixed(2)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}"/>`;
@@ -363,7 +369,7 @@
         (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
         histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
         : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
-      `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}</tspan>` : ""}</text>` +
+      `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}${barPeriod ? ` · ${barPeriod}` : ""}</tspan>` : ""}</text>` +
       labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
       `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/><circle class="dot-ind" r="4"/></g>` +
       `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;

@@ -364,12 +364,18 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(app.element('macro-legend').innerHTML, /% since 1987/);
   assert.equal((plot().match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 2);  // the line breaks at the gap
   app.click('macro-series-seg', 'mseries', 'macd');
+  app.click('macro-range-seg', 'mrange', '6M');
   assert.match(plot(), /class="line-ind2" d="M/);  // the signal line shares the pane
   assert.match(plot(), /class="hist hist-(up|down)( hist-fading)?" x=/);  // histogram bars between the two lines
   assert.match(plot(), /class="hist hist-up hist-fading"/);  // a bar shorter than the one before it is faint
   assert.match(plot(), /class="hist hist-down"/);
   assert.match(plot(), /MACD<tspan class="ref-label"> · line at 0: MACD crosses its signal<\/tspan>/);
   assert.match(app.element('macro-legend').innerHTML, /key-ind2[^>]*><\/i>signal [+−][\d.]+%/);
+  app.click('macro-range-seg', 'mrange', 'MAX');  // long ranges group the bars instead of dropping them
+  assert.match(plot(), /class="hist hist-(up|down)/);
+  assert.match(plot(), /MACD<tspan class="ref-label"> · line at 0: MACD crosses its signal · (weekly|monthly|quarterly|yearly) bars<\/tspan>/);
+  app.click('macro-range-seg', 'mrange', '1M');
+  assert.doesNotMatch(plot(), /bars<\/tspan>/);  // every session has its own bar at short ranges
   app.click('macro-series-seg', 'mseries', 'rsi');
   assert.match(plot(), /RSI 14<tspan class="ref-label"> · line at 50: gains balance losses<\/tspan>/);
   assert.match(app.element('macro-windows-note').textContent, /calculated from the S&P 500's own closes, so this correlation reflects that arithmetic/);
