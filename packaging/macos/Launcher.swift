@@ -81,7 +81,7 @@ final class Launcher: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         menu.addItem(item)
         let submenu = NSMenu()
         submenu.addItem(withTitle: "Open dashboard", action: #selector(openDashboard), keyEquivalent: "o").target = self
-        submenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "").target = self
+        submenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: ",").target = self
         submenu.addItem(withTitle: "Quit StocksHighIV", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = submenu
         NSApp.mainMenu = menu

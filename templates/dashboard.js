@@ -200,7 +200,7 @@
 
   /* ---------- macro chart: S&P 500 above, one sentiment series below, on one time axis ---------- */
   // Two panes rather than two y-scales on one plot: rescaling either axis could make any two lines look related.
-  const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0], ["MAX", "Since 1987"]];
+  const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0], ["20Y", "20 years", 20, 0], ["MAX", "Since 1987"]];
   const MACRO_EARLIEST = Date.UTC(1987, 6, 1);  // AAII's survey begins in July 1987
   const MACRO_GAP = 21 * 864e5;  // longer than any weekly step: a real gap in a series
   const MACRO_SERIES = {

@@ -163,6 +163,15 @@ class MacroTests(unittest.TestCase):
             s.write_json(Path(temp) / "sentiment" / "put_call_history.json", {"sessions": stored})
             self.assertEqual(s.put_call_series(archive), [["2019-10-07", 0.5], ["2026-09-14", 0.7]])  # no average spans the gap
 
+    def test_put_call_backfill_reaches_the_end_of_cboes_archive(self):
+        sessions = [date(2019, 10, 1) + timedelta(days=i) for i in range(1200)]
+        archive = [["2003-10-17", 0.7], ["2019-10-04", 0.62]]
+        window = s.put_call_window(sessions, archive, 649)
+        self.assertEqual((window[0], window[-1], len(window)), (date(2019, 10, 5), sessions[-1], 1196))
+        self.assertEqual(s.put_call_window(sessions, [], 649), sessions[-649:])  # no archive: only the rank window
+        caught_up = [["2003-10-17", 0.7], [sessions[-1].isoformat(), 0.62]]
+        self.assertEqual(s.put_call_window(sessions, caught_up, 649), sessions[-649:])
+
     def test_chart_history_prefers_cnn_and_cards_never_carry_it(self):
         replica = {"status": "ok", "value": 31.0, "as_of": "2026-09-17", "history": [["2026-09-17", 31.0]]}
         short_cnn = {"status": "ok", "value": 28.6, "as_of": "2026-09-18", "history": [["2026-09-17", 28.3]]}

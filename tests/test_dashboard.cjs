@@ -351,7 +351,7 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(plot(), /class="line-ind" d="M/);
   assert.match(plot(), /class="ref"/);  // VIX reference line at 20
   assert.match(plot(), /VIX<tspan class="ref-label"> · line at 20<\/tspan>/);
-  assert.equal((table().match(/<tr/g) || []).length, 8);  // header plus seven ranges
+  assert.equal((table().match(/<tr/g) || []).length, 9);  // header plus eight ranges
   assert.match(table(), /<tr class="current"><th scope="row">1 year<\/th>/);
   assert.match(table(), /\+(0\.9\d|1\.00) · moves with <span class="sub">n=/);
   assert.match(app.element('macro-chart-note').textContent, /VIX · Cboe · since Sep 2, 2024/);
@@ -359,6 +359,8 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(table(), /<tr class="current"><th scope="row">Since 1987<\/th>/);
   assert.match(app.element('macro-legend').innerHTML, /% since 1987/);
   assert.equal((plot().match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 2);  // the line breaks at the gap
+  app.click('macro-range-seg', 'mrange', '20Y');
+  assert.match(table(), /<tr class="current"><th scope="row">20 years<\/th>/);
   app.click('macro-range-seg', 'mrange', '1M');
   assert.match(table(), /<tr class="current"><th scope="row">1 month<\/th>/);
   assert.equal(app.storage['ivl-view'].mrange, '1M');

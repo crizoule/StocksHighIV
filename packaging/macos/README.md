@@ -42,7 +42,7 @@ This creates an explicitly **UNSIGNED** test ZIP with an ad-hoc signature; it do
 
 ## In-app updates (1.1.0+)
 
-The Mac launcher embeds Sparkle 2.10.0 (download pinned by SHA-256), checks for updates daily, and offers **Check for Updates…** in its application menu. Installing requires the user's action. Sparkle verifies Ed25519 archive signatures and Apple code signatures; notarization is retained. The archive is verified before extraction. Its private update-signing key stays in the `StocksHighIV-updates` Keychain account; only the public key is in `release.json`.
+The Mac launcher embeds Sparkle 2.10.0 (download pinned by SHA-256), checks for updates daily, and offers **Check for Updates…** in its application menu (⌘,). Installing requires the user's action. Sparkle verifies Ed25519 archive signatures and Apple code signatures; notarization is retained. The archive is verified before extraction. Its private update-signing key stays in the `StocksHighIV-updates` Keychain account; only the public key is in `release.json`.
 
 When installation is requested, the launcher reserves the Python backend. Active setup/download work finishes first; new scheduled/manual scans are blocked until restart or cancellation. The browser status bar reports the pending update. Application Support data, watchlists, and schedules are outside the replaced bundle. Put the app in a writable Applications folder; macOS may request authorization when replacing a protected copy.
 

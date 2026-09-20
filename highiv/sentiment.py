@@ -57,6 +57,7 @@ CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its hi
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "20y"           # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks, then history
 PUT_CALL_BACKFILL_SECONDS = 180   # Cboe history fills over a few refreshes, never in one long burst
+PUT_CALL_FILLED = 0.99            # share of sessions stored that counts as a complete history
 SECTORS = {
     "technology": "XLK", "financial services": "XLF", "financials": "XLF",
     "healthcare": "XLV", "health care": "XLV", "consumer cyclical": "XLY",
@@ -359,12 +360,27 @@ def put_call_archive():
         return []
 
 
+def put_call_window(sessions, archive, rank_window):
+    """Sessions to fetch from Cboe: every one after its archive files end, so the two sources join without a gap.
+
+    Cboe's daily page starts on 2019-10-07, the session after the last archive file ends, and the app stores what it
+    fetches, so the gap fills over a few refreshes. Without the archive, only the rank window is worth fetching.
+    """
+    if archive:
+        end = iso_date(archive[-1][0])
+        after = [day for day in sessions if day > end]
+        if after:
+            return after
+    return sessions[-rank_window:]
+
+
 def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=fear_greed.PUT_CALL_SESSIONS,
                       backfill_seconds=PUT_CALL_BACKFILL_SECONDS):
     local = now.astimezone(context.MARKET_TZ)
     bars = fear_greed.completed(download_bars(fear_greed.INDEX_SYMBOLS, actions=True, period=period), local.date(), local.hour)
     sessions = [d.date() for d in bars["Close"]["^GSPC"].dropna().index]
-    recent = sessions[-put_call_sessions:]  # only these are fetched from Cboe; older ones come from its saved archive
+    archive = put_call_archive()
+    recent = put_call_window(sessions, archive, put_call_sessions)  # fetched from Cboe; earlier ones come from its archive
     inputs = fear_greed.index_inputs(bars["Close"], bars["Dividends"])
     notes = {}
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -377,10 +393,12 @@ def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=
         except (OSError, ValueError, KeyError, TypeError):
             notes["strength"] = notes["breadth"] = "NYSE stock history unavailable; run a scan to build the stock list."
         history = stored.result()
-    inputs["put_call"] = fear_greed.put_call_input(history, sessions, put_call_archive())
+    inputs["put_call"] = fear_greed.put_call_input(history, sessions, archive)
     held = sum(d.isoformat() in history for d in recent)
+    # A few sessions never parse (Cboe posts nothing for some half-days), so "complete" allows a small shortfall.
     notes["put_call"] = (f"Building Cboe history: {held}/{len(recent)} sessions stored; fills over the next refreshes."
-                         if held < len(recent) - 20 else f"{held} Cboe sessions stored, and Cboe's 2003–2019 archive before them.")
+                         if held < len(recent) * PUT_CALL_FILLED
+                         else f"{held} Cboe sessions stored, and Cboe's 2003–2019 archive before them.")
     return inputs, notes
 
 
