@@ -41,9 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Much faster downloads. After each market close, the likely leaders download first and a preliminary dashboard appears in about 20 minutes (instead of about 50), clearly marked; the remaining lower-IV stocks follow and the complete dashboard replaces it. Quotes and macro readings downloaded after the close are reused until the next session trades, so evening, weekend and next-morning refreshes take a minute or two. Company details, charts and headlines now download four stocks at a time.
+    notes = '''Adds the weekly Commitments of Traders report to the macro panel. The new card shows asset managers' net E-mini S&P 500 futures position as a share of open interest, with its three-year COT index; leveraged funds and VIX futures are listed for reference. The S&P 500 chart gains a COT series back to June 2006. Data comes from the CFTC's free public API, published Fridays for the previous Tuesday.
 
-The first download after updating is still a full one, because quotes saved by earlier versions have no download time.
+Asset managers lead the card because their net position has moved with the index week to week, while leveraged funds' has moved against it: much of theirs hedges stock holdings or arbitrages futures against the index, so it is positioning rather than a view on direction.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
