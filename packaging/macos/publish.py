@@ -41,9 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Adds the weekly Commitments of Traders report to the macro panel. The new card shows asset managers' net E-mini S&P 500 futures position as a share of open interest, with its three-year COT index; leveraged funds and VIX futures are listed for reference. The S&P 500 chart gains a COT series back to June 2006. Data comes from the CFTC's free public API, published Fridays for the previous Tuesday.
+    notes = '''The Fear & Greed chart now reaches back to August 2009 instead of September 2021. CNN's public feed only serves about five years, so the app's own replica scores continue the line before that; the chart names both sources and where they join, and the older years score on all seven components using Cboe's saved 2003-2019 put/call archive.
 
-Asset managers lead the card because their net position has moved with the index week to week, while leveraged funds' has moved against it: much of theirs hedges stock holdings or arbitrages futures against the index, so it is positioning rather than a view on direction.
+This costs no extra memory: the NYSE universe is now folded into daily market-wide counts one group of stocks at a time, so 20 years of daily bars uses about what 4 years did before. A macro refresh takes about 10 seconds longer, at most once per market close.
+
+Older stretches of the strength and breadth components are computed over today's stock list, so they carry survivorship bias, and 2020 to 2022 scores on six components because Cboe's archive files stop in October 2019.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
