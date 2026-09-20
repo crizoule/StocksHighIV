@@ -41,11 +41,13 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The Fear & Greed chart now reaches back to August 2009 instead of September 2021. CNN's public feed only serves about five years, so the app's own replica scores continue the line before that; the chart names both sources and where they join, and the older years score on all seven components using Cboe's saved 2003-2019 put/call archive.
+    notes = '''Version 2.0 completes the macro panel's long history and finishes the download work of the 1.7-1.9 releases.
 
-This costs no extra memory: the NYSE universe is now folded into daily market-wide counts one group of stocks at a time, so 20 years of daily bars uses about what 4 years did before. A macro refresh takes about 10 seconds longer, at most once per market close.
+The equity put/call history no longer stops at the last three years. The app now backfills Cboe's daily statistics until they meet its archive files, which join without a gap on 2019-10-07, giving one continuous line from October 2003 to today. About 1,750 sessions fill over several data refreshes, three minutes of requests each, and the Fear & Greed replica regains its put/call component for 2020 to 2022 as they arrive.
 
-Older stretches of the strength and breadth components are computed over today's stock list, so they carry survivorship bias, and 2020 to 2022 scores on six components because Cboe's archive files stop in October 2019.
+The S&P 500 and sentiment chart gains a 20-year range, and Check for Updates… now answers to Command-comma on Mac.
+
+Since 1.6.1, downloads have become much faster: quotes and macro readings that are final are reused until the next session trades, likely leaders download first so a preliminary dashboard appears in about 20 minutes, company details and charts download four stocks at a time, the macro panel gained the CFTC's weekly Commitments of Traders positioning, and the Fear & Greed line now reaches back to August 2009.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
