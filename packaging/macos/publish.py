@@ -41,11 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The S&P 500 and sentiment chart gains two technical series: RSI 14 and MACD 12/26/9, both back to 1987. MACD is shown as a percentage of the index, so 1987 and today share one scale, and is drawn with its signal line.
+    notes = '''MACD is now drawn the conventional way. The chart adds histogram bars between the MACD and signal lines, green above zero and red below, faded when a bar is shorter than the one before it, so a closing gap reads at a glance. Bars appear while each session has room for one, about a year of history; longer ranges keep the two lines alone.
 
-Neither costs a download: both are calculated from the S&P 500 daily closes the app already fetches, before older points are thinned to weekly, so the older years keep daily-based values. They are chart-only context rather than sentiment, so they do not affect the panel's readings or its overall tilt, and the correlation column notes that their agreement with the index is arithmetic rather than a relationship between two sources.
-
-The first data refresh after installing downloads the S&P 500 history again, because saved copies hold no RSI or MACD.
+The signal line is now solid orange instead of a dashed copy of the MACD line, both on the S&P 500 chart and on the per-stock MACD in expanded rows. No data changes, so no extra download.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
