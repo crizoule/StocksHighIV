@@ -628,15 +628,17 @@ th.col-stock { z-index: 2; }
 .macro-legend .key { display: inline-block; width: 16px; border-top: 2px solid; border-radius: 1px; }
 .macro-legend .key-spx { border-color: var(--ink-2); }
 .macro-legend .key-ind { border-color: var(--accent); }
+.macro-legend .key-ind2 { border-color: var(--accent); border-style: dashed; opacity: 0.7; }
 .macro-plot { min-height: 120px; }
 .macro-svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
 .macro-svg .grid { stroke: var(--grid); stroke-width: 1; }
 .macro-svg .ref { stroke: var(--rule-strong); stroke-width: 1; }
 .macro-svg .tick, .macro-svg .ref-label, .macro-svg .pane-empty { fill: var(--ink-3); font: 500 11px var(--font-mono); }
 .macro-svg .pane-label { fill: var(--ink-2); font: 600 11px var(--font-ui); }
-.macro-svg .line-spx, .macro-svg .line-ind { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.macro-svg .line-spx, .macro-svg .line-ind, .macro-svg .line-ind2 { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .macro-svg .line-spx { stroke: var(--ink-2); }
 .macro-svg .line-ind { stroke: var(--accent); }
+.macro-svg .line-ind2 { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; opacity: 0.6; }
 .macro-svg .dot-spx { fill: var(--ink-2); stroke: var(--surface-2); stroke-width: 2; }
 .macro-svg .dot-ind { fill: var(--accent); stroke: var(--surface-2); stroke-width: 2; }
 .macro-svg .xhair line { stroke: var(--ink-3); stroke-width: 1; }

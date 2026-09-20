@@ -342,6 +342,9 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
     put_call: {name: 'Equity put/call, 5-day average', frequency: 'daily', source: 'Cboe', points: []},
     fear_greed: {name: 'CNN Fear & Greed', frequency: 'daily', source: 'CNN', points: []},
     cot: {name: "COT: asset managers' net, % of open interest", frequency: 'weekly', source: 'CFTC', points: spx.filter((_, i) => i % 5 === 1).map(([d, v]) => [d, (6000 - v) / 100])},
+    rsi: {name: 'RSI 14', frequency: 'daily', source: 'Computed from S&P 500 daily closes', points: spx.map(([d, v]) => [d, 50 + (v % 40) / 4])},
+    macd: {name: 'MACD 12/26/9, % of index', frequency: 'daily', source: 'Computed from S&P 500 daily closes',
+           points: spx.map(([d, v]) => [d, (v % 20) / 10 - 1]), signal: spx.map(([d, v]) => [d, (v % 20) / 12 - 1])},
   }};
   const app = renderEarnings(null, {}, {macro: {cards: [], history}, saved: {mseries: 'vix', mrange: '1Y'}});
   const plot = () => app.element('macro-plot').innerHTML, table = () => app.element('macro-windows').innerHTML;
@@ -359,6 +362,14 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(table(), /<tr class="current"><th scope="row">Since 1987<\/th>/);
   assert.match(app.element('macro-legend').innerHTML, /% since 1987/);
   assert.equal((plot().match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 2);  // the line breaks at the gap
+  app.click('macro-series-seg', 'mseries', 'macd');
+  assert.match(plot(), /class="line-ind2" d="M/);  // the signal line shares the pane
+  assert.match(plot(), /MACD<tspan class="ref-label"> · line at 0: MACD crosses its signal<\/tspan>/);
+  assert.match(app.element('macro-legend').innerHTML, /key-ind2[^>]*><\/i>signal [+−][\d.]+%/);
+  app.click('macro-series-seg', 'mseries', 'rsi');
+  assert.match(plot(), /RSI 14<tspan class="ref-label"> · line at 50: gains balance losses<\/tspan>/);
+  assert.match(app.element('macro-windows-note').textContent, /calculated from the S&P 500's own closes, so this correlation reflects that arithmetic/);
+  assert.doesNotMatch(plot(), /class="line-ind2"/);  // only MACD has a second line
   app.click('macro-range-seg', 'mrange', '20Y');
   assert.match(table(), /<tr class="current"><th scope="row">20 years<\/th>/);
   app.click('macro-range-seg', 'mrange', '1M');

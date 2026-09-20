@@ -26,7 +26,7 @@
     if (saved && ["all", "us", "tsx"].includes(saved.market)) state.market = saved.market;
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
-    if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot"].includes(saved.mseries)) state.mseries = saved.mseries;
+    if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot", "rsi", "macd"].includes(saved.mseries)) state.mseries = saved.mseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
     if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; }
   } catch (err) { /* storage unavailable: defaults apply */ }
@@ -208,6 +208,8 @@
     vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
+    rsi: { short: "RSI 14", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: gains balance losses", derived: true },
+    macd: { short: "MACD", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", derived: true },
     cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: net flat" },
   };
   const monthsBack = (t, years, months) => {
@@ -222,7 +224,8 @@
       .filter((p) => Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && isNum(p[1]))
       .map(([d, v]) => ({ t: day(d).getTime(), d, v })).sort((a, b) => a.t - b.t);
     const series = {};
-    for (const key of Object.keys(MACRO_SERIES)) series[key] = { ...(history?.series?.[key] || {}), points: points(history?.series?.[key]?.points) };
+    for (const key of Object.keys(MACRO_SERIES)) series[key] = { ...(history?.series?.[key] || {}), points: points(history?.series?.[key]?.points),
+      signal: points(history?.series?.[key]?.signal) };
     macroCache = { source: history, spx: points(history?.spx), series };
     return macroCache;
   };
@@ -304,7 +307,8 @@
     const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
     $("macro-legend").innerHTML =
       `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
-      `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>`;
+      `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>` +
+      (meta.second && series.signal.length ? `<span><i class="key key-ind2" aria-hidden="true"></i>${esc(meta.second)} ${esc(meta.fmt(series.signal[series.signal.length - 1].v))}</span>` : "");
     const W = Math.max(240, $("macro-plot").clientWidth || 960);
     const m = { left: 64, right: 14 }, top = 22, h1 = 186, gap = 34, h2 = 104, axis = 22, H = top + h1 + gap + h2 + axis;  // pane labels sit above each pane
     const x = (t) => m.left + ((t - start) / Math.max(end - start, 1)) * (W - m.left - m.right);
@@ -320,7 +324,9 @@
     };
     const path = (points, y) => points.map((p, i) => `${i && p.t - points[i - 1].t <= MACRO_GAP ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
     const top2 = top + h1 + gap;
-    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind, top2, h2, meta.ref) : null;
+    // MACD's signal line shares the pane, so the scale covers both lines.
+    const second = meta.second ? series.signal.filter((p) => p.t >= start && p.t <= end) : [];
+    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind.concat(second), top2, h2, meta.ref) : null;
     const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
       `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
     // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
@@ -345,7 +351,7 @@
       `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${state.mlog ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
       (I ? grid(I, m.left - 8) +
         (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
-        `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
+        (second.length ? `<path class="line-ind2" d="${path(second, I.y)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
         : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
       `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}</tspan>` : ""}</text>` +
       labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
@@ -363,7 +369,7 @@
           `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
           `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
       }).join("") + "</tbody>";
-    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.`;
+    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
   };
   const hoverMacro = (ev) => {
     const svg = ev.target.closest(".macro-svg");

@@ -49,10 +49,12 @@ PUT_CALL_ARCHIVES = (             # Cboe's discontinued daily files; the newer o
 )
 TTL_HOURS = {("history", "put_call_archive"): 24 * 30}  # Cboe no longer updates these files
 COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
-    ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31",
+    ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31" and bool(item.get("rsi")),
     ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
 }
 SESSION_KINDS = {"macro", "history", "benchmarks"}  # news and social posts keep arriving while markets are closed
+RSI_PERIOD = 14                   # technical context on the S&P 500 itself, computed from the closes already downloaded
+MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
 REPLICA_HISTORY = "20y"           # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks, then history
@@ -420,14 +422,39 @@ def fetch_cnn(client, today):
     return parse_cnn(text, today)
 
 
+def rsi(closes, period=RSI_PERIOD):
+    """Wilder's relative strength index over daily closes; the first `period` sessions warm the averages."""
+    change = closes.diff()
+    gain = change.clip(lower=0).ewm(alpha=1 / period, adjust=False).mean()
+    loss = (-change.clip(upper=0)).ewm(alpha=1 / period, adjust=False).mean()
+    return (100 - 100 / (1 + gain / loss.where(loss > 0))).fillna(100).iloc[period:]
+
+
+def macd(closes, fast=MACD_FAST, slow=MACD_SLOW, signal=MACD_SIGNAL):
+    """MACD and its signal line as a percentage of the index, so 1987 and today are on one scale.
+
+    In index points the same crossover is worth 3 points at 300 and 80 points at 7,600; dividing by the close
+    keeps the long ranges readable.
+    """
+    line = (closes.ewm(span=fast, adjust=False).mean() - closes.ewm(span=slow, adjust=False).mean()) / closes * 100
+    return line.iloc[slow + signal:], line.ewm(span=signal, adjust=False).mean().iloc[slow + signal:]
+
+
 def fetch_spx_history(now):
     local = now.astimezone(context.MARKET_TZ)
     frame = fear_greed.completed(yf.download("^GSPC", start=EARLIEST.isoformat(), interval="1d", auto_adjust=False, progress=False,
                                              multi_level_index=False, timeout=20), local.date(), local.hour)
-    rows = [(d.date(), round(number(v, 1), 2)) for d, v in frame["Close"].dropna().items()]
+    closes = frame["Close"].dropna()
+    rows = [(d.date(), round(number(v, 1), 2)) for d, v in closes.items()]
     if len(rows) < 250:
         raise ValueError("Insufficient S&P 500 history")
-    return {"points": [[d.isoformat(), v] for d, v in thinned(rows, rows[-1][0] - timedelta(days=HISTORY_DAYS))]}
+    # Both are derived from these daily closes before thinning, so old weeks keep daily-based values.
+    recent_from = rows[-1][0] - timedelta(days=HISTORY_DAYS)
+    line, signal = macd(closes)
+    series = lambda values, digits: [[d.isoformat(), v] for d, v in thinned(
+        [(d.date(), round(float(v), digits)) for d, v in values.items()], recent_from)]
+    return {"points": [[d.isoformat(), v] for d, v in thinned(rows, recent_from)],
+            "rsi": series(rsi(closes), 1), "macd": series(line, 3), "macd_signal": series(signal, 3)}
 
 
 def thinned(rows, recent_from):
@@ -699,6 +726,11 @@ def chart_history(macro, history):
         "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics",
                          frequency="daily", points=history.get("put_call") or []),
         "fear_greed": {**fear, "unit": "", "frequency": "daily"},
+        "rsi": dict(name=f"RSI {RSI_PERIOD}", unit="", source="Computed from S&P 500 daily closes", frequency="daily",
+                    points=(history.get("spx") or {}).get("rsi") or []),
+        "macd": dict(name=f"MACD {MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}, % of index", unit="%", source="Computed from S&P 500 daily closes",
+                     frequency="daily", points=(history.get("spx") or {}).get("macd") or [],
+                     signal=(history.get("spx") or {}).get("macd_signal") or []),
         "cot": dict(name="COT: asset managers' net, % of open interest", unit="%", source="CFTC Traders in Financial Futures · E-mini S&P 500",
                     frequency="weekly", points=(macro.get("cot") or {}).get("history") or []),
     }}

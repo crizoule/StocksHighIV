@@ -172,6 +172,26 @@ class MacroTests(unittest.TestCase):
         caught_up = [["2003-10-17", 0.7], [sessions[-1].isoformat(), 0.62]]
         self.assertEqual(s.put_call_window(sessions, caught_up, 649), sessions[-649:])
 
+    def test_rsi_and_macd_come_from_the_saved_daily_closes(self):
+        import pandas as pd
+        rising = pd.Series([100 + i for i in range(60)], index=pd.date_range("2026-01-01", periods=60, freq="B"), dtype=float)
+        self.assertAlmostEqual(s.rsi(rising).iloc[-1], 100)  # only gains
+        self.assertEqual(len(s.rsi(rising)), 60 - s.RSI_PERIOD)
+        line, signal = s.macd(rising)
+        self.assertEqual(len(line), 60 - s.MACD_SLOW - s.MACD_SIGNAL)
+        self.assertGreater(line.iloc[-1], 0)  # a climb keeps MACD above zero
+        climbing = pd.Series([100 * 1.01 ** i for i in range(80)], index=pd.date_range("2026-01-01", periods=80, freq="B"))
+        faster, slower = s.macd(climbing)
+        self.assertTrue(faster.iloc[-1] > slower.iloc[-1] > 0)  # accelerating: MACD pulls above its signal
+        falling = pd.Series(rising.to_numpy()[::-1], index=rising.index)
+        self.assertLess(s.macd(falling)[0].iloc[-1], 0)
+        history = {"spx": {"points": [["2026-09-17", 7637.76]], "rsi": [["2026-09-17", 54.1]],
+                           "macd": [["2026-09-17", 0.42]], "macd_signal": [["2026-09-17", 0.31]]}}
+        series = s.chart_history({}, history)["series"]
+        self.assertEqual(series["rsi"]["points"], [["2026-09-17", 54.1]])
+        self.assertEqual((series["macd"]["points"], series["macd"]["signal"]), ([["2026-09-17", 0.42]], [["2026-09-17", 0.31]]))
+        self.assertEqual(s.chart_history({}, {})["series"]["macd"]["points"], [])
+
     def test_chart_history_prefers_cnn_and_cards_never_carry_it(self):
         replica = {"status": "ok", "value": 31.0, "as_of": "2026-09-17", "history": [["2026-09-17", 31.0]]}
         short_cnn = {"status": "ok", "value": 28.6, "as_of": "2026-09-18", "history": [["2026-09-17", 28.3]]}
@@ -216,9 +236,10 @@ class MacroTests(unittest.TestCase):
 
     def test_a_fresh_cache_with_too_little_history_is_fetched_again(self):
         short = {"points": [["2016-09-19", 2139.12], ["2026-09-17", 7637.76]]}
-        full = {"points": [["1987-07-01", 302.94], ["2026-09-17", 7637.76]]}
+        full = {"points": [["1987-07-01", 302.94], ["2026-09-17", 7637.76]], "rsi": [["2026-09-17", 54.1]]}
         spx, vix = s.COMPLETE[("history", "spx")], s.COMPLETE[("macro", "vix")]
         self.assertEqual((spx(short), spx(full), spx({"points": []})), (False, True, False))
+        self.assertFalse(spx({k: v for k, v in full.items() if k != "rsi"}))  # saved before RSI and MACD were computed
         self.assertEqual((vix({"history": [["2016-09-12", 15.2]]}), vix({"history": [["1990-01-02", 17.24]]})), (False, True))
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
             s.cached_read("history-spx", lambda: short, NOW)  # saved by 1.5.0, an hour earlier
