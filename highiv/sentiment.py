@@ -55,7 +55,7 @@ COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
 SESSION_KINDS = {"macro", "history", "benchmarks"}  # news and social posts keep arriving while markets are closed
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
 REPLICA_MAX_AGE = 4
-REPLICA_HISTORY = "4y"            # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks
+REPLICA_HISTORY = "20y"           # 52-week highs, 20-session smoothing, 125-session z-scores, 500-session ranks, then history
 PUT_CALL_BACKFILL_SECONDS = 180   # Cboe history fills over a few refreshes, never in one long burst
 SECTORS = {
     "technology": "XLK", "financial services": "XLF", "financials": "XLF",
@@ -274,16 +274,34 @@ def write_json(path, data):
             os.unlink(temporary)
 
 
-def download_bars(symbols, *, actions=False, period=REPLICA_HISTORY, chunk=150):
-    frames = []
+def bar_chunks(symbols, *, actions=False, period=REPLICA_HISTORY, chunk=150):
     for start in range(0, len(symbols), chunk):
         frame = yf.download(list(symbols[start:start + chunk]), period=period, interval="1d", auto_adjust=False,
                             actions=actions, group_by="column", progress=False, threads=True, timeout=20)
         if frame is not None and not frame.empty:
-            frames.append(frame)
+            yield frame
+
+
+def download_bars(symbols, *, actions=False, period=REPLICA_HISTORY, chunk=150):
+    frames = list(bar_chunks(symbols, actions=actions, period=period, chunk=chunk))
     if not frames:
         raise ValueError("No price history")
     return pd.concat(frames, axis=1, sort=True)
+
+
+def nyse_totals(symbols, today, market_hour, *, period=REPLICA_HISTORY, chunk=150):
+    """Daily new highs, lows and up/down volume over the NYSE universe, one group of stocks at a time.
+
+    Each group is reduced to counts and released, so twenty years of history costs about 280 MB rather than 900 MB.
+    """
+    totals = None
+    for frame in bar_chunks(symbols, period=period, chunk=chunk):
+        bars = fear_greed.completed(frame, today, market_hour)
+        part = fear_greed.nyse_counts(bars["Close"], bars["High"], bars["Low"], bars["Volume"])
+        totals = part if totals is None else totals.add(part, fill_value=0)
+    if totals is None:
+        raise ValueError("No price history")
+    return totals
 
 
 def nyse_symbols():
@@ -333,28 +351,36 @@ def put_call_history(client, sessions, deadline, workers=4):
     return history
 
 
+def put_call_archive():
+    """Cboe's saved 2003–2019 daily ratios, so the replica's older years keep their put/call component."""
+    try:
+        return json.loads((config.DATA_DIR / "sentiment" / "history-put_call_archive.json").read_text(encoding="utf-8"))["daily"]
+    except (OSError, ValueError, TypeError, KeyError):
+        return []
+
+
 def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=fear_greed.PUT_CALL_SESSIONS,
                       backfill_seconds=PUT_CALL_BACKFILL_SECONDS):
     local = now.astimezone(context.MARKET_TZ)
     bars = fear_greed.completed(download_bars(fear_greed.INDEX_SYMBOLS, actions=True, period=period), local.date(), local.hour)
-    sessions = [d.date() for d in bars["Close"]["^GSPC"].dropna().index][-put_call_sessions:]
+    sessions = [d.date() for d in bars["Close"]["^GSPC"].dropna().index]
+    recent = sessions[-put_call_sessions:]  # only these are fetched from Cboe; older ones come from its saved archive
     inputs = fear_greed.index_inputs(bars["Close"], bars["Dividends"])
     notes = {}
     with ThreadPoolExecutor(max_workers=1) as pool:
         # Cboe and Yahoo are separate hosts, so the history backfill overlaps the stock download.
-        stored = pool.submit(put_call_history, client, sessions, time.monotonic() + backfill_seconds)
+        stored = pool.submit(put_call_history, client, recent, time.monotonic() + backfill_seconds)
         try:
-            stocks = fear_greed.completed(download_bars(nyse_symbols(), period=period), local.date(), local.hour)
-            nyse, count = fear_greed.nyse_inputs(stocks["Close"], stocks["High"], stocks["Low"], stocks["Volume"])
+            nyse, count = fear_greed.nyse_inputs(nyse_totals(nyse_symbols(), local.date(), local.hour, period=period))
             inputs.update(nyse)
             notes["strength"] = notes["breadth"] = f"{count} NYSE stocks with a year of daily bars (screen universe, ≥ $1B)."
         except (OSError, ValueError, KeyError, TypeError):
             notes["strength"] = notes["breadth"] = "NYSE stock history unavailable; run a scan to build the stock list."
         history = stored.result()
-    inputs["put_call"] = fear_greed.put_call_input(history, sessions)
-    held = sum(d.isoformat() in history for d in sessions)
-    notes["put_call"] = (f"Building Cboe history: {held}/{len(sessions)} sessions stored; fills over the next refreshes."
-                         if held < len(sessions) - 20 else f"{held} Cboe sessions stored.")
+    inputs["put_call"] = fear_greed.put_call_input(history, sessions, put_call_archive())
+    held = sum(d.isoformat() in history for d in recent)
+    notes["put_call"] = (f"Building Cboe history: {held}/{len(recent)} sessions stored; fills over the next refreshes."
+                         if held < len(recent) - 20 else f"{held} Cboe sessions stored, and Cboe's 2003–2019 archive before them.")
     return inputs, notes
 
 
@@ -363,7 +389,9 @@ def fetch_fear_greed(client, now):
     inputs, notes = fear_greed_inputs(client, now)
     item = fear_greed.replica(inputs, notes)
     scores = fear_greed.history(inputs, require=fear_greed.MIN_COMPONENTS)["score"].dropna()
-    return {**item, "history": [[d.date().isoformat(), round(float(v), 1)] for d, v in scores.items()]}
+    rows = [(d.date(), round(float(v), 1)) for d, v in scores.items()]
+    points = thinned(rows, rows[-1][0] - timedelta(days=HISTORY_DAYS)) if rows else []
+    return {**item, "history": [[d.isoformat(), v] for d, v in points]}
 
 
 def fetch_cnn(client, today):
@@ -639,8 +667,14 @@ def with_replica(cnn, replica, today):
 def chart_history(macro, history):
     """S&P 500 closes and each sentiment series, as [date, value] pairs, for the dashboard's macro chart."""
     cnn = (macro.get("cnn") or {}).get("history") or []
-    fear = (dict(name="Fear & Greed", source="CNN", points=cnn) if len(cnn) >= 20 else
-            dict(name="Fear & Greed replica", source="Replica from public data", points=(macro.get("fear_greed") or {}).get("history") or []))
+    replica = (macro.get("fear_greed") or {}).get("history") or []
+    if len(cnn) >= 20:
+        # CNN's feed serves about five years; the replica covers the years before it, labelled as the other source.
+        earlier = [p for p in replica if p[0] < cnn[0][0]]
+        fear = dict(name="Fear & Greed", points=earlier + cnn,
+                    source=f"CNN from {cnn[0][0]}" + (f"; replica from public data {earlier[0][0]} to then" if earlier else ""))
+    else:
+        fear = dict(name="Fear & Greed replica", source="Replica from public data", points=replica)
     return {"spx": (history.get("spx") or {}).get("points") or [], "series": {
         "aaii": dict(name="AAII bull–bear spread", unit=" pp", source="AAII weekly survey", frequency="weekly", points=history.get("aaii") or []),
         "vix": dict(name="VIX", unit="", source="Cboe", frequency="daily", points=(macro.get("vix") or {}).get("history") or []),

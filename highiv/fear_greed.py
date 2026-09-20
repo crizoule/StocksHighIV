@@ -106,17 +106,32 @@ def index_inputs(close, dividends):
     }
 
 
-def nyse_inputs(close, high, low, volume):
+def nyse_counts(close, high, low, volume):
+    """One group of stocks reduced to daily market-wide counts.
+
+    The counts add up across groups, so the caller folds the market in group by group instead of holding
+    twenty years of every stock at once.
+    """
     prior_high = high.shift(1).rolling(251).max()
     prior_low = low.shift(1).rolling(251).min()
     listed = close.notna() & prior_high.notna() & prior_low.notna()
-    count = listed.sum(axis=1)
-    net_highs = ((high >= prior_high) & listed).sum(axis=1) - ((low <= prior_low) & listed).sum(axis=1)
-    strength = (100 * net_highs / count.where(count >= MIN_NYSE_STOCKS)).rolling(20).mean()
     change = close.diff()
-    traded = change.notna().sum(axis=1)
-    up, down = volume.where(change > 0).sum(axis=1), volume.where(change < 0).sum(axis=1)
-    net = (1000 * (up - down) / (up + down).where(traded >= MIN_NYSE_STOCKS)).dropna()
+    return pd.DataFrame({
+        "count": listed.sum(axis=1),
+        "highs": ((high >= prior_high) & listed).sum(axis=1),
+        "lows": ((low <= prior_low) & listed).sum(axis=1),
+        "traded": change.notna().sum(axis=1),
+        "up": volume.where(change > 0).sum(axis=1),
+        "down": volume.where(change < 0).sum(axis=1),
+    })
+
+
+def nyse_inputs(totals):
+    """Strength and breadth from the summed daily counts of every NYSE group."""
+    count = totals["count"]
+    strength = (100 * (totals["highs"] - totals["lows"]) / count.where(count >= MIN_NYSE_STOCKS)).rolling(20).mean()
+    up, down = totals["up"], totals["down"]
+    net = (1000 * (up - down) / (up + down).where(totals["traded"] >= MIN_NYSE_STOCKS)).dropna()
     # Ratio-adjusted McClellan volume oscillator (19/39-day EMAs), summed; the first 100 sessions warm the EMAs.
     breadth = (net.ewm(alpha=0.1, adjust=False).mean() - net.ewm(alpha=0.05, adjust=False).mean()).cumsum()
     return {"strength": strength.dropna(), "breadth": breadth.iloc[100:]}, int(count.iloc[-1]) if len(count) else 0
@@ -144,9 +159,12 @@ def put_call_ratio(volumes):
     return (volumes["equity"][1] + volumes["etp"][1]) / calls
 
 
-def put_call_input(history, sessions):
-    """Five-session average on the trading calendar; a missing session leaves that average undefined."""
-    daily = {}
+def put_call_input(history, sessions, archive=()):
+    """Five-session average on the trading calendar; a missing session leaves that average undefined.
+
+    `archive` holds Cboe's discontinued daily ratios (2003–2019) for the years before the app's own stored volumes.
+    """
+    daily = {pd.Timestamp(day): ratio for day, ratio in archive}
     for day, volumes in history.items():
         try:
             daily[pd.Timestamp(day)] = put_call_ratio(volumes)

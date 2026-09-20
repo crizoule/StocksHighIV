@@ -64,12 +64,17 @@ class InputTests(unittest.TestCase):
         down = pd.DataFrame({f"D{i}": 400 - np.arange(300.0) for i in range(300)}, index=days)
         close = pd.concat([up, down], axis=1)
         volume = pd.DataFrame(1000.0, index=days, columns=close.columns)
-        parts, count = fg.nyse_inputs(close, close, close, volume)
+        parts, count = fg.nyse_inputs(fg.nyse_counts(close, close, close, volume))
         self.assertEqual(count, 600)
         self.assertAlmostEqual(parts["strength"].iloc[-1], 0)  # 300 new highs, 300 new lows
-        more_up, _ = fg.nyse_inputs(close.iloc[:, :450], close.iloc[:, :450], close.iloc[:, :450], volume.iloc[:, :450])
+        more_up, _ = fg.nyse_inputs(fg.nyse_counts(close.iloc[:, :450], close.iloc[:, :450], close.iloc[:, :450], volume.iloc[:, :450]))
         self.assertTrue(more_up["strength"].empty)  # 450 stocks: below the sample floor
         self.assertTrue(np.allclose(parts["breadth"], parts["breadth"].iloc[0]))  # balanced volume, flat summation
+        # Stocks folded in group by group must give exactly the market-wide result, since the counts add up.
+        halves = [fg.nyse_counts(f.iloc[:, half::2], f.iloc[:, half::2], f.iloc[:, half::2], volume.iloc[:, half::2])
+                  for half in (0, 1) for f in [close]]
+        folded, _ = fg.nyse_inputs(halves[0].add(halves[1], fill_value=0))
+        self.assertTrue(folded["strength"].equals(parts["strength"]) and folded["breadth"].equals(parts["breadth"]))
 
     def test_junk_gap_uses_twelve_distributions_and_lags_one_session(self):
         days = sessions(400)
@@ -96,6 +101,9 @@ class InputTests(unittest.TestCase):
         days = [d.date() for d in sessions(8)]
         history = {d.isoformat(): {"equity": [100, 50], "etp": [100, 50]} for d in days if d != days[5]}
         average = fg.put_call_input(history, days)
+        # Cboe's discontinued archive covers sessions the app has no stored volumes for.
+        archived = fg.put_call_input(history, days, [[days[5].isoformat(), 0.5], [days[0].isoformat(), 9.9]])
+        self.assertEqual(list(archived.dropna().index.date), days[4:])  # the gap is filled; stored volumes still win
         self.assertEqual(list(average.index.date), [days[4]])
         self.assertAlmostEqual(average.iloc[0], 0.5)
 

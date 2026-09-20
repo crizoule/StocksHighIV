@@ -171,6 +171,13 @@ class MacroTests(unittest.TestCase):
                          ("Fear & Greed replica", [["2026-09-17", 31.0]]))
         long_cnn = {**short_cnn, "history": [[f"2026-08-{d:02d}", 40.0] for d in range(1, 26)]}
         self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["name"], "Fear & Greed")
+        # CNN's feed reaches back about five years; older replica scores continue the line and the source says so.
+        older = {**replica, "history": [["2009-08-05", 55.0], ["2026-07-31", 44.0], ["2026-08-01", 39.0]]}
+        spliced = s.chart_history({"cnn": long_cnn, "fear_greed": older}, {})["series"]["fear_greed"]
+        self.assertEqual(spliced["points"][:3], [["2009-08-05", 55.0], ["2026-07-31", 44.0], ["2026-08-01", 40.0]])
+        self.assertEqual(len(spliced["points"]), 27)  # two replica points, then CNN's own 25
+        self.assertEqual(spliced["source"], "CNN from 2026-08-01; replica from public data 2009-08-05 to then")
+        self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["source"], "CNN from 2026-08-01")
         sources = {"macro": {"vix": {"status": "ok", "value": 15.4, "as_of": "2026-09-17", "history": [["2026-09-17", 15.4]]},
                              "cnn": long_cnn, "fear_greed": replica}, "history": {"spx": {"points": [["2026-09-17", 7637.76]]}}}
         macro = evaluate(sources=sources)["macro_sentiment"]
