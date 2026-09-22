@@ -115,6 +115,15 @@ test('missing catalyst and unavailable news remain visible as uncertainty', () =
   assert.doesNotMatch(checked.expanded, /News coverage/);
 });
 
+test('the business description sits beside Why this IV, leaving the charts last', () => {
+  const { expanded } = renderEarnings(null, {summary: 'Test Company designs and sells widgets.', iv_why_as_of: '2026-09-18'});
+  const at = (text) => expanded.indexOf(text);
+  assert.ok(at('What the business does') > at('WHY THIS IV') || at('What the business does') > at('Why this IV'));
+  assert.ok(at('What the business does') < at('Implied volatility') || at('Implied volatility') === -1);
+  assert.ok(at('What the business does') < at('class="mini-row"') || at('class="mini-row"') === -1);
+  assert.match(expanded, /class="detail-group detail-summary"><h4>What the business does<\/h4><p class="detail-text">Test Company designs/);
+});
+
 test('possible events retain source links and escaped full evidence', () => {
   const { collapsed, expanded } = renderEarnings(null, {
     iv_why: 'Possible catalyst: TEST announces public offering', iv_why_kind: 'news',

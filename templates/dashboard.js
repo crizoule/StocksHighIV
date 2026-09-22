@@ -759,6 +759,8 @@
         ...(r.iv_news_status === "unavailable" ? [["News coverage", "Lookup failed for this row"]]
           : r.iv_news_status === "empty" ? [["News coverage", "No usable headlines returned"]] : []),
       ]) +
+      // Beside Why this IV, filling the room those columns leave, so only the charts sit at the foot of a row.
+      (r.summary ? `<div class="detail-group detail-summary"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
       (structural.length ? group("Structural context · possible sensitivities", structural.concat([
         ["Interpretation", "Business exposure can help explain recurring volatility, but does not establish the cause of this session’s IV. Profile classifications are based on the cached business description; truncated or missing descriptions can leave gaps."],
       ]), "detail-wide context-details") : "") +
@@ -800,7 +802,6 @@
           ])
         : "") +
       detailCharts(r) +
-      (r.summary ? `<div class="detail-group detail-wide"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
       `</div></td></tr>`;
   };
 
