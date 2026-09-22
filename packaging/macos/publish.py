@@ -41,9 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''An expanded row now opens with Company, Why this IV and What the business does side by side, and ends with its price charts. The description used to sit below the charts while the first row left a column empty, so the row is also a little shorter.
+    notes = '''Optional news and social feeds can now be configured for the packaged app. Opened from Finder or the Start menu, the app inherits no shell, so an API key set in a terminal never reached the download. Write the credentials one per line as NAME=value in data/credentials.env beside the saved market data (~/Library/Application Support/StocksHighIV/data on Mac, the app folder on Windows). Only ALPHAVANTAGE_API_KEY, STOCKTWITS_USERNAME and STOCKTWITS_PASSWORD are read, and values never reach the log or a saved dashboard. With an Alpha Vantage key, the news component of each stock's sentiment score starts scoring on the next data refresh.
 
-No data changes, so no extra download.
+Expanded rows also open with the business description across the top, followed by Company, Why this IV and a double-width stock and sector sentiment panel, and still end with the price charts.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
