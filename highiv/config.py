@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_ROOT = Path(os.environ.get("HIGHIV_DATA_ROOT", ROOT))
 DATA_DIR = RUNTIME_ROOT / "data"
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
+SNAPSHOT_KEEP = 30            # daily dashboards kept; all but the newest are stored gzipped
 OUTPUT_DIR = RUNTIME_ROOT / "output"
 TEMPLATE_DIR = ROOT / "templates"
 DB_PATH = DATA_DIR / "highiv.sqlite"

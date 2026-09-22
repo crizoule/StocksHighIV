@@ -90,6 +90,31 @@ class BorrowTests(unittest.TestCase):
         self.assertEqual(borrow.lookup(table, {"symbol": "H.TO", "market": "CA"})["fee"], 9.5)
 
 
+class SnapshotTests(TempProjectTest):
+    def test_older_snapshots_are_packed_and_capped(self):
+        config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        for day in range(1, 36):
+            (config.SNAPSHOT_DIR / f"2026-08-{day:02d}.json").write_text(json.dumps({"run_date": f"2026-08-{day:02d}", "rows": []}))
+        report.keep_snapshots(keep=30)
+        kept = [p.name for p in report.snapshots()]
+        self.assertEqual(len(kept), 30)
+        self.assertEqual(kept[0], "2026-08-06.json.gz")  # the five oldest are gone
+        self.assertEqual(kept[-1], "2026-08-35.json")  # the newest stays readable without unpacking
+        self.assertTrue(all(name.endswith(".gz") for name in kept[:-1]))
+        self.assertEqual(report.read_snapshot(report.snapshots()[0])["run_date"], "2026-08-06")
+        # A rebuilt day replaces its packed copy instead of leaving two files for one date.
+        with patch.object(report, "render", return_value="<p>page</p>"), patch.object(report.context, "apply"):
+            report.write_outputs({"run_date": "2026-08-20", "rows": [{"symbol": "TEST"}], "generated_at": "2026-08-20T17:00:00-04:00"})
+        names = [p.name for p in report.snapshots()]
+        self.assertEqual([n for n in names if n.startswith("2026-08-20")], ["2026-08-20.json.gz"])
+        again = report.read_snapshot(config.SNAPSHOT_DIR / "2026-08-20.json.gz")
+        self.assertEqual(again["rows"], [{"symbol": "TEST"}])
+        # Today's own rebuild stays unpacked, so the next build and `explain` read it directly.
+        with patch.object(report, "render", return_value="<p>page</p>"), patch.object(report.context, "apply"):
+            report.write_outputs({"run_date": "2026-08-35", "rows": [], "generated_at": "2026-08-35T17:00:00-04:00"})
+        self.assertTrue((config.SNAPSHOT_DIR / "2026-08-35.json").exists())
+
+
 class SettledTests(unittest.TestCase):
     def test_cboe_follows_spys_session_and_mx_the_weekday_calendar(self):
         ny = scan.market.MARKET_TZ

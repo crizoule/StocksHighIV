@@ -522,11 +522,16 @@ th.col-stock { z-index: 2; }
 .detail-group a { color: var(--accent-ink); text-underline-offset: 2px; }
 .detail-wide { grid-column: 1 / -1; }
 /* The opening row keeps its own proportions, so widening sentiment never narrows the data groups below. */
-.detail-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 6px 32px; align-items: start; }
+.detail-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: min-content 1fr;
+  gap: 6px 32px; align-items: start; }  /* the flexible second row absorbs the taller panel's extra height */
+/* Company and Why this IV are short, so the description takes the room under them beside the taller panel. */
+.detail-row .detail-summary { grid-column: 1 / span 2; }
+.detail-row .sentiment-details { grid-column: 3; grid-row: 1 / span 2; }
 .context-details dl { grid-template-columns: minmax(100px, 190px) minmax(0, 1fr); line-height: 1.5; }
 .context-details dd { text-align: left; font-weight: 400; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-  .detail-row { grid-template-columns: minmax(0, 1fr); }
+  .detail-row { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+  .detail-row .detail-summary, .detail-row .sentiment-details { grid-column: auto; grid-row: auto; }
   .context-details dl { grid-template-columns: minmax(0, 1fr); }
   .context-details dt { margin-top: 6px; font-weight: 600; }
 }

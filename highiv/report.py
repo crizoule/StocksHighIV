@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import json
 import os
 import re
+import shutil
 import statistics
 import tempfile
 from collections import Counter
@@ -273,12 +275,49 @@ def _atomic_text(path: Path, text: str) -> None:
             temporary.unlink()
 
 
+def snapshots() -> list[Path]:
+    """Saved daily dashboards, oldest first. The newest stays plain JSON; older ones are gzipped."""
+    return sorted(list(config.SNAPSHOT_DIR.glob("*.json")) + list(config.SNAPSHOT_DIR.glob("*.json.gz")),
+                  key=lambda path: path.name.removesuffix(".gz"))
+
+
+def read_snapshot(path: Path) -> dict:
+    if path.suffix == ".gz":
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def keep_snapshots(keep: int = config.SNAPSHOT_KEEP) -> None:
+    """Gzip every snapshot but the newest, then drop the oldest beyond the cap.
+
+    A day's dashboard is about 13 MB of JSON and only the newest is ever read again; compressed they cost
+    roughly a tenth of that, so a year of runs stays in the tens of megabytes.
+    """
+    saved = snapshots()
+    for path in saved[:-1]:
+        if path.suffix == ".gz":
+            continue
+        packed = path.with_suffix(".json.gz")
+        try:
+            with path.open("rb") as source, gzip.open(packed.with_suffix(".gz.part"), "wb", compresslevel=6) as target:
+                shutil.copyfileobj(source, target)
+            os.replace(packed.with_suffix(".gz.part"), packed)
+            path.unlink()
+        except OSError:
+            packed.with_suffix(".gz.part").unlink(missing_ok=True)
+    for path in snapshots()[:-keep]:
+        path.unlink(missing_ok=True)
+
+
 def write_outputs(payload: dict) -> Path:
     context.apply(payload)
     config.SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     config.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     page = render(payload)
     _atomic_text(config.SNAPSHOT_DIR / f"{payload['run_date']}.json", json.dumps(payload))
+    (config.SNAPSHOT_DIR / f"{payload['run_date']}.json.gz").unlink(missing_ok=True)  # a rebuilt day replaces its packed copy
+    keep_snapshots()
     _atomic_text(config.OUTPUT_DIR / "artifact.html", page)  # body-only page for publishing
     standalone = config.OUTPUT_DIR / "dashboard.html"
     _atomic_text(standalone,
@@ -308,11 +347,11 @@ def _universe_stats(stocks: list[dict], scans: list[dict]) -> dict:
 
 def _settled_rows(run_date: str) -> dict[str, dict]:
     """Rows of the newest earlier-or-same snapshot, each usable only for the session it was built after the close of."""
-    for path in sorted(config.SNAPSHOT_DIR.glob("*.json"), reverse=True):
-        if path.stem > run_date:
+    for path in reversed(snapshots()):
+        if path.name.removesuffix(".gz").removesuffix(".json").rstrip(".") > run_date:
             continue
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = read_snapshot(path)
             built = datetime.fromisoformat(payload["generated_at"])
         except (OSError, ValueError, KeyError, TypeError):
             return {}
@@ -560,10 +599,10 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None, p
 
 def explain_latest() -> Path:
     """Re-read the latest snapshot, fetch news, and rewrite the Why this IV column."""
-    snaps = sorted(config.SNAPSHOT_DIR.glob("*.json"))
+    snaps = snapshots()
     if not snaps:
         raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
-    payload = json.loads(snaps[-1].read_text(encoding="utf-8"))
+    payload = read_snapshot(snaps[-1])
     rows = payload["rows"]
     log(f"Explaining IV for {len(rows)} leaders from the {payload['run_date']} snapshot")
     for i, row in enumerate(rows, 1):
@@ -582,10 +621,10 @@ def explain_latest() -> Path:
 
 def sentiment_latest() -> Path:
     """Refresh sentiment on the saved screen without running the full IV scan."""
-    snaps = sorted(config.SNAPSHOT_DIR.glob("*.json"))
+    snaps = snapshots()
     if not snaps:
         raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
-    payload = json.loads(snaps[-1].read_text(encoding="utf-8"))
+    payload = read_snapshot(snaps[-1])
     sentiment.enrich(payload)
     # Keep market-data generation timestamps intact; sentiment carries its own timestamps.
     return write_outputs(payload)

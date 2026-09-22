@@ -192,6 +192,48 @@ class MacroTests(unittest.TestCase):
         self.assertEqual((series["macd"]["points"], series["macd"]["signal"]), ([["2026-09-17", 0.42]], [["2026-09-17", 0.31]]))
         self.assertEqual(s.chart_history({}, {})["series"]["macd"]["points"], [])
 
+    def test_news_keeps_a_week_of_articles_and_splits_the_quota_between_cap_bands(self):
+        article = lambda url, ticker, hours=1: {
+            "url": url, "title": "T", "source": "Wire",
+            "time_published": (NOW - timedelta(hours=hours)).strftime("%Y%m%dT%H%M%S"),
+            "ticker_sentiment": [{"ticker": ticker, "relevance_score": "0.5", "ticker_sentiment_score": "0.1"}]}
+        rows = ([{"symbol": f"MID{i}", "yahoo_symbol": f"MID{i}", "market": "US", "iv30": 200 - i, "market_cap_usd": 5e9} for i in range(20)]
+                + [{"symbol": f"BIG{i}", "yahoo_symbol": f"BIG{i}", "market": "US", "iv30": 100 - i, "market_cap_usd": 300e9} for i in range(20)]
+                + [{"symbol": "TSX.TO", "yahoo_symbol": "TSX.TO", "market": "CA", "iv30": 500, "market_cap_usd": 5e9}])
+        covered = [article(f"u{i}", "MID0", 2) for i in range(3)]  # the shared feed already carries this one
+        covered += [article("near-mid", "MID9", 2), article("near-big", "BIG7", 2)]  # one article each: nearly scored
+        picks = s.news_requests(rows, covered, 6)
+        self.assertEqual(picks, ["MID9", "MID1", "MID2", "BIG7", "BIG0", "BIG1"])  # half each, nearly-covered first
+        self.assertNotIn("MID0", picks)  # already over the threshold
+        self.assertNotIn("TSX.TO", picks)  # news scoring covers US listings only
+        self.assertEqual(s.news_requests(rows[:1], covered, 6), [])  # nothing left to ask about
+        self.assertEqual(len(s.news_requests(rows, [], 5)), 5)  # an odd allowance is still spent in full
+
+        asked, quota = [], []
+        def fake_request(client, url, errors="strict", **kwargs):
+            symbol = kwargs["params"].get("tickers")
+            asked.append(symbol)
+            if len(asked) > 3:
+                return json.dumps({"Information": "rate limit reached"})  # the provider's prose, not a feed
+            return json.dumps({"feed": [article(f"new-{symbol}", symbol or "MID9")]})
+        with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)), \
+                patch.object(s, "request_text", side_effect=fake_request):
+            stale = article("old", "MID5", hours=8 * 24)
+            s.write_json(Path(temp) / "sentiment" / "news-feed.json", {"feed": [stale, article("kept", "MID6", 48)], "requests": {}})
+            result = s.fetch_news(None, "KEY", rows, NOW, interval=0)
+            # The shared feed first, then leaders; a ticker the provider refuses does not stop the others.
+            self.assertEqual(asked[:5], [None, "MID6", "MID9", "MID0", "MID1"])  # MID5's stale article does not count
+            urls = {a["url"] for a in result["feed"]}
+            self.assertIn("kept", urls)  # two days old: still inside the window
+            self.assertNotIn("old", urls)  # eight days old: dropped
+            self.assertEqual(result["requests"], {"2026-09-18": 3})  # refused requests are not counted
+            self.assertEqual(result["asked"], ["MID6", "MID9"])
+            self.assertEqual(len(asked), 6)  # shared feed, two answered, then three refusals end the round
+            asked.clear()
+            s.write_json(Path(temp) / "sentiment" / "news-feed.json", {"feed": [], "requests": {"2026-09-18": 25}})
+            s.fetch_news(None, "KEY", rows, NOW, interval=0)
+            self.assertEqual(asked, [None])  # the day's allowance is already spent
+
     def test_chart_history_prefers_cnn_and_cards_never_carry_it(self):
         replica = {"status": "ok", "value": 31.0, "as_of": "2026-09-17", "history": [["2026-09-17", 31.0]]}
         short_cnn = {"status": "ok", "value": 28.6, "as_of": "2026-09-18", "history": [["2026-09-17", 28.3]]}

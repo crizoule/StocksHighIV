@@ -53,6 +53,12 @@ COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
     ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
 }
 SESSION_KINDS = {"macro", "history", "benchmarks"}  # news and social posts keep arriving while markets are closed
+NEWS_URL = "https://www.alphavantage.co/query"
+NEWS_WINDOW_DAYS = 7              # articles are kept this long, so thin coverage of small caps accumulates
+NEWS_DAILY_REQUESTS = 25          # Alpha Vantage's free daily allowance: the shared feed plus per-ticker asks
+NEWS_MIN_ARTICLES = 3             # a ticker the shared feed covers this well needs no request of its own
+NEWS_MIN_INTERVAL_S = 13.0        # the same free plan allows about five requests a minute
+NEWS_BUDGET_SECONDS = 120         # per refresh; the rest of the day's allowance goes to the next ones
 RSI_PERIOD = 14                   # technical context on the S&P 500 itself, computed from the closes already downloaded
 MACD_FAST, MACD_SLOW, MACD_SIGNAL = 12, 26, 9
 CNN_HISTORY_DAYS = 1826           # CNN's feed rejects start dates before its history (late 2020)
@@ -608,8 +614,86 @@ def fetch_benchmark(symbol):
 def parse_news(text):
     data = json.loads(text)
     if not isinstance(data.get("feed"), list):
-        raise ValueError("News unavailable or quota exhausted")
-    return {"feed": data["feed"]}
+        raise ValueError("News unavailable or quota exhausted")  # the provider explains a spent quota in prose
+    return [a for a in data["feed"] if isinstance(a, dict) and a.get("url")]
+
+
+def published(article):
+    try:
+        return datetime.strptime(article["time_published"], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def news_requests(rows, articles, remaining):
+    """Leaders worth a request of their own: those the shared feed nearly covers, halved between cap bands.
+
+    The shared feed carries whatever made national news, which is mostly the largest companies, so the quota
+    goes to the screen's own leaders — evenly split, or the whole of it when only one band has names left.
+    A ticker already carrying an article or two is asked about first: it is the one a single request can lift
+    over the three-article threshold, while a company with no coverage at all usually has none to find.
+    """
+    covered = {}
+    for article in articles:
+        for item in article.get("ticker_sentiment") or []:
+            covered[item.get("ticker")] = covered.get(item.get("ticker"), 0) + 1
+    bands = {"mid": [], "large": []}
+    ranked = sorted(rows, key=lambda r: (-min(covered.get(r.get("yahoo_symbol") or str(r.get("symbol") or "").replace(".", "-"), 0),
+                                              NEWS_MIN_ARTICLES - 1), -(r.get("iv30") or 0)))
+    for row in ranked:
+        symbol = row.get("yahoo_symbol") or str(row.get("symbol") or "").replace(".", "-")
+        if row.get("market") != "US" or not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,11}", symbol):
+            continue
+        if covered.get(symbol, 0) >= NEWS_MIN_ARTICLES or symbol in bands["mid"] or symbol in bands["large"]:
+            continue
+        bands["large" if (row.get("market_cap_usd") or 0) >= config.LARGE_MARKET_CAP_USD else "mid"].append(symbol)
+    share = remaining // 2
+    chosen = bands["mid"][:share] + bands["large"][:remaining - share]
+    spare = bands["mid"][share:] + bands["large"][remaining - share:]
+    return chosen + spare[:max(0, remaining - len(chosen))]
+
+
+def fetch_news(client, api_key, rows, now, *, interval=NEWS_MIN_INTERVAL_S, budget=NEWS_BUDGET_SECONDS):
+    """The shared Alpha Vantage feed plus a request for each uncovered leader, kept as a rolling window.
+
+    The free allowance is NEWS_DAILY_REQUESTS a day and about five a minute, so per-ticker requests are spaced
+    out and stop after `budget` seconds; the day's remaining allowance is spent over the next refreshes. One
+    request goes to the shared feed and the rest are split between the cap bands. Articles are kept for
+    NEWS_WINDOW_DAYS, so coverage of the smaller names builds up over a week instead of being thrown away.
+    """
+    try:
+        saved = json.loads((config.DATA_DIR / "sentiment" / "news-feed.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    today = now.astimezone(context.MARKET_TZ).date().isoformat()
+    used = (saved.get("requests") or {}).get(today, 0)
+    ask = lambda extra: parse_news(request_text(client, NEWS_URL, params={
+        "function": "NEWS_SENTIMENT", "sort": "LATEST", "apikey": api_key, **extra}))
+    cutoff = now - timedelta(days=NEWS_WINDOW_DAYS)
+    fresh = lambda items: {a["url"]: a for a in items if isinstance(a, dict) and a.get("url") and (published(a) or cutoff) > cutoff}
+    articles = fresh(saved.get("feed") or [])
+    for article in ask({"limit": 1000}):  # an unusable response raises before anything is stored
+        articles[article["url"]] = article
+    used += 1
+    articles = fresh(articles.values())  # choose who to ask about from the window that actually scores
+    asked, refused = [], 0
+    limiter = net.RateLimiter(min_interval=interval)
+    deadline = time.monotonic() + budget
+    for symbol in news_requests(rows, articles.values(), max(0, NEWS_DAILY_REQUESTS - used)):
+        if refused >= 3 or time.monotonic() > deadline:
+            break  # the allowance is spent or this refresh has asked for long enough
+        limiter.wait()
+        try:
+            for article in ask({"tickers": symbol, "limit": 50}):
+                articles[article["url"]] = article
+        except (ValueError, KeyError, OSError):
+            refused += 1  # one ticker the provider would not answer for; the others are still worth asking
+            continue
+        refused = 0
+        used += 1
+        asked.append(symbol)
+    return {"feed": list(fresh(articles.values()).values()), "requests": {today: used},
+            "asked": asked, "window_days": NEWS_WINDOW_DAYS}
 
 
 def parse_social(text):
@@ -650,9 +734,7 @@ def collect(rows, *, now=None):
             jobs[("benchmarks", symbol)] = lambda symbol=symbol: fetch_benchmark(symbol)
         api_key = os.environ.get("ALPHAVANTAGE_API_KEY")
         if api_key:
-            # One bounded feed request per refresh, not one request for every screened ticker.
-            jobs[("news", "feed")] = lambda: parse_news(request_text(client, "https://www.alphavantage.co/query",
-                params={"function": "NEWS_SENTIMENT", "sort": "LATEST", "limit": 1000, "apikey": api_key}))
+            jobs[("news", "feed")] = lambda: fetch_news(client, api_key, rows, now)
         username, password = os.environ.get("STOCKTWITS_USERNAME"), os.environ.get("STOCKTWITS_PASSWORD")
         if username and password:
             for row in rows:

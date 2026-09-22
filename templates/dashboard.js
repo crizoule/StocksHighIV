@@ -741,7 +741,6 @@
     if (r.iv_price_context) observed.unshift(["This stock", esc(r.iv_price_context.label) +
       `<span class="sub context-evidence">${esc(r.iv_price_context.detail)}</span>`]);
     return `<tr class="detail"><td colspan="18"><div class="detail-grid">` +
-      (r.summary ? `<div class="detail-group detail-wide"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
       `<div class="detail-row">` +
       group("Company", [
         ["HQ", esc(r.country || "—")],
@@ -760,7 +759,8 @@
         ...(r.iv_news_status === "unavailable" ? [["News coverage", "Lookup failed for this row"]]
           : r.iv_news_status === "empty" ? [["News coverage", "No usable headlines returned"]] : []),
       ]) +
-      // Beside Why this IV, filling the room those columns leave, so only the charts sit at the foot of a row.
+      // The description fills the room under these two short groups, beside the taller sentiment panel.
+      (r.summary ? `<div class="detail-group detail-summary"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
       sentimentDetails(r) + `</div>` +
       (structural.length ? group("Structural context · possible sensitivities", structural.concat([
         ["Interpretation", "Business exposure can help explain recurring volatility, but does not establish the cause of this session’s IV. Profile classifications are based on the cached business description; truncated or missing descriptions can leave gaps."],
