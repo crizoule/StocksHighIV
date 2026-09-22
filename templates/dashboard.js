@@ -755,7 +755,9 @@
         ["Source", esc(r.iv_why_source || "—")],
         ["Date", r.iv_why_date ? fmtDay(r.iv_why_date) : "—"],
         ["IV session assessed", fmtDay(r.iv_why_as_of)],
-        ["Notes", esc(r.iv_why_detail || "—")],
+        // The standing caveats live once in "How to read this screen"; only a gap in coverage is per-row news.
+        ...(r.iv_news_status === "unavailable" ? [["News coverage", "Lookup failed for this row"]]
+          : r.iv_news_status === "empty" ? [["News coverage", "No usable headlines returned"]] : []),
       ]) +
       (structural.length ? group("Structural context · possible sensitivities", structural.concat([
         ["Interpretation", "Business exposure can help explain recurring volatility, but does not establish the cause of this session’s IV. Profile classifications are based on the cached business description; truncated or missing descriptions can leave gaps."],
@@ -788,7 +790,6 @@
         ["Settlement date", fmtDay(r.short_date)],
         ["Short / float data fetched", esc(fetchedLabel(r.details_fetched_at))],
         ["Borrow fee / availability fetched", esc(fetchedLabel(r.borrow_fetched_at))],
-        ["Timing", "The settlement date dates the short position. Fetch times show when the feed was retrieved; the provider’s exact update time for float, days to cover and borrow data is not supplied."],
       ]) +
       (isNum(r.earnings_in_days)
         ? group("Next earnings", [

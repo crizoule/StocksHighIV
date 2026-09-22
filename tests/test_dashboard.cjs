@@ -107,6 +107,12 @@ test('missing catalyst and unavailable news remain visible as uncertainty', () =
   assert.match(collapsed, /No clear catalyst found/);
   assert.match(collapsed, /News unavailable/);
   assert.match(expanded, /IV session assessed/);
+  assert.match(expanded, /News coverage<\/dt><dd[^>]*>Lookup failed for this row/);
+  // The standing caveats sit once at the bottom of the page, not in every row.
+  assert.doesNotMatch(expanded, /does not establish that no catalyst exists/);
+  assert.doesNotMatch(expanded, /Timing<\/dt>/);
+  const checked = renderEarnings(null, {iv_why_kind: 'none', iv_news_status: 'checked', iv_why_as_of: '2026-09-18'});
+  assert.doesNotMatch(checked.expanded, /News coverage/);
 });
 
 test('possible events retain source links and escaped full evidence', () => {
@@ -118,7 +124,7 @@ test('possible events retain source links and escaped full evidence', () => {
   });
   assert.match(collapsed, /Possible event/);
   assert.match(expanded, /href="https:\/\/example.com\/event"/);
-  assert.match(expanded, /&lt;only&gt;/);
+  assert.match(collapsed, /data-tip="Headline &lt;only&gt;; causal link not verified."/);  // full note stays as the cell's tooltip
   assert.match(expanded, /Financing/);
 });
 

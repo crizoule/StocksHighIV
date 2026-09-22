@@ -163,7 +163,8 @@ class ScanTests(TempProjectTest):
                                  friday_evening)  # a copy keeps its original download time
             scan.scan("2026-09-19", refresh_quotes=True)  # final quotes are not downloaded again
             self.assertEqual(self.fetch.call_count, 2)
-            self.settled.return_value = {"cboe": "2026-09-21T20:30:00+00:00", "mx": None}  # Monday has closed
+            # A session that closed after every stored quote, whenever this test runs: nothing is final any more.
+            self.settled.return_value = {"cboe": "2099-01-05T21:30:00+00:00", "mx": None}
             scan.scan("2026-09-21")
             self.assertEqual(self.fetch.call_count, 6)  # a new session: every quote is downloaded again
     def test_priority_pass_downloads_likely_leaders_first(self):
