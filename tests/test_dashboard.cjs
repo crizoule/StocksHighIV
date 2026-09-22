@@ -121,7 +121,7 @@ test('the business description opens the details and sentiment sits beside Why t
   assert.match(expanded, /class="detail-group detail-summary"><h4>What the business does<\/h4><p class="detail-text">Test Company designs/);
   assert.ok(at('Why this IV') < at('What the business does'));  // under the two short groups
   assert.ok(at('What the business does') < at('Stock / sector sentiment'));  // the panel spans both of those rows
-  assert.match(expanded, /class="detail-row"><div class="detail-group "><h4>Company/);  // one row: company, why, sentiment
+  assert.match(expanded, /class="detail-split"><div class="detail-main"><div class="detail-group "><h4>Company/);
   assert.ok(at('Stock / sector sentiment') < at('class="mini-row"') || at('class="mini-row"') === -1);
 });
 
@@ -276,6 +276,16 @@ test('sentiment keeps missing data unknown and expands the evidence with safe li
   const missing = renderEarnings(null);
   assert.match(missing.collapsed, /Insufficient evidence/);
   assert.doesNotMatch(missing.collapsed, /50\/100/);
+});
+
+test('a feed with no credentials leaves its card out instead of repeating the same notice', () => {
+  const parts = (extra) => ({sentiment: {score: 60, label: 'Positive', coverage: 70, mode: 'Price only', method: 'M',
+    components: [{key: 'stock', weight: 40, score: 62, detail: 'd'}, {key: 'sector', weight: 30, score: 58, detail: 'd'}, extra]}});
+  const off = renderEarnings(null, parts({key: 'social', weight: 10, score: null, detail: 'not connected', configured: false}));
+  assert.doesNotMatch(off.expanded, /Social sentiment/);
+  assert.match(off.expanded, /Stock momentum/);
+  const on = renderEarnings(null, parts({key: 'social', weight: 10, score: null, detail: 'Stocktwits unavailable'}));
+  assert.match(on.expanded, /Social sentiment/);  // configured but empty today: still shown
 });
 
 test('sentiment sorts both directions with stale and unknown rows always last', () => {

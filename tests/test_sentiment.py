@@ -362,6 +362,11 @@ class StockTests(unittest.TestCase):
         self.assertEqual(result["coverage"], 70)
         self.assertEqual(result["score"], round((stock["score"] * 40 + sector["score"] * 30) / 70))
         self.assertIsNone(news["score"])
+        # Without credentials there is nothing to show: the dashboard leaves both cards out.
+        self.assertEqual((news.get("configured"), social.get("configured")), (False, False))
+        with_key = evaluate(sources={"news": {"feed": {"status": "ok", "feed": []}}, "social_configured": True})["rows"][0]["sentiment"]
+        self.assertNotIn("configured", with_key["components"][2])
+        self.assertNotIn("configured", with_key["components"][3])
         self.assertIsNone(social["score"])
 
     def test_no_rank_without_fresh_matched_sector_and_stock(self):

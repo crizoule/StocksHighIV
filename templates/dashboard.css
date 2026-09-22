@@ -521,17 +521,16 @@ th.col-stock { z-index: 2; }
 .detail-group dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .detail-group a { color: var(--accent-ink); text-underline-offset: 2px; }
 .detail-wide { grid-column: 1 / -1; }
-/* The opening row keeps its own proportions, so widening sentiment never narrows the data groups below. */
-.detail-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 2fr; grid-template-rows: min-content 1fr;
-  gap: 6px 32px; align-items: start; }  /* the flexible second row absorbs the taller panel's extra height */
-/* Company and Why this IV are short, so the description takes the room under them beside the taller panel. */
-.detail-row .detail-summary { grid-column: 1 / span 2; }
-.detail-row .sentiment-details { grid-column: 3; grid-row: 1 / span 2; }
+/* The row data sits on the left and the sentiment panel on the right, so the taller of the two leaves no gap. */
+.detail-split { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 6px 32px; align-items: start; }
+.detail-main { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px 32px; align-items: start; }
+.detail-main .detail-summary, .detail-main .context-details { grid-column: 1 / -1; }
+/* One card per line inside the narrower right column, which also keeps the panel close to the data's height. */
+.detail-split .sentiment-components { grid-template-columns: minmax(0, 1fr); }
 .context-details dl { grid-template-columns: minmax(100px, 190px) minmax(0, 1fr); line-height: 1.5; }
 .context-details dd { text-align: left; font-weight: 400; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
-  .detail-row { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
-  .detail-row .detail-summary, .detail-row .sentiment-details { grid-column: auto; grid-row: auto; }
+  .detail-split, .detail-main { grid-template-columns: minmax(0, 1fr); }
   .context-details dl { grid-template-columns: minmax(0, 1fr); }
   .context-details dt { margin-top: 6px; font-weight: 600; }
 }

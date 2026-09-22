@@ -838,7 +838,7 @@ def momentum(row, now):
 def news_component(row, feed, now):
     component = unavailable("news", "News sentiment is not connected. An Alpha Vantage API key is required.")
     if feed.get("status") == "not_configured":
-        return component
+        return {**component, "configured": False}  # no credentials: the dashboard leaves the card out entirely
     if row.get("market") != "US":
         component["detail"] = "News scoring currently covers US listings only; Canadian symbols are not matched to US names."
         return component
@@ -911,6 +911,8 @@ def evaluate(payload, inputs, *, now=None):
         social_part = unavailable("social", "Social sentiment is not connected. Authorized Stocktwits data access is required.")
         if inputs.get("social_configured"):
             social_part["detail"] = "Stocktwits unavailable, stale, or listing unsupported. No social score inferred from price."
+        else:
+            social_part["configured"] = False
         if social.get("score") is not None and fresh(social.get("fetched_at"), today, 1):
             social_part = dict(key="social", weight=10, score=social["score"], status=social.get("status", "ok"),
                 as_of=social["fetched_at"][:10], max_age=1, fetched_at=social["fetched_at"], source="Stocktwits",
