@@ -24,6 +24,10 @@ from . import aaii, config, watchlist
 APP_ID = 'stockshighiv-local-v1'
 
 
+# Optional provider credentials the download process accepts; values are never logged or written to a dashboard.
+CREDENTIAL_NAMES = ('ALPHAVANTAGE_API_KEY', 'STOCKTWITS_USERNAME', 'STOCKTWITS_PASSWORD')
+
+
 class App:
     def __init__(self, root=config.ROOT):
         self.root = Path(root)
@@ -146,8 +150,26 @@ class App:
             except Exception as exc:
                 self.log(f'Automatic download could not start: {exc}')
 
+    def credentials(self):
+        """Optional provider credentials from data/credentials.env, since an app opened from Finder inherits no shell.
+
+        Only the documented names are read, values never appear in the log, and the file stays out of the repository
+        and out of every saved dashboard.
+        """
+        found = {}
+        try:
+            text = (self.data_root/'data/credentials.env').read_text(encoding='utf-8')
+        except (OSError, ValueError):
+            return found
+        for line in text.splitlines():
+            name, _, value = line.partition('=')
+            name, value = name.strip(), value.strip().strip('"\'')
+            if name in CREDENTIAL_NAMES and value:
+                found[name] = value
+        return found
+
     def run_process(self, command, *, events=False):
-        env = {**os.environ, 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
+        env = {**os.environ, **self.credentials(), 'PYTHONUNBUFFERED': '1', 'PYTHONIOENCODING': 'utf-8', 'PYTHONUTF8': '1'}
         if events:
             env['HIGHIV_PROGRESS'] = '1'
         with self.lock:

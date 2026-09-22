@@ -108,7 +108,7 @@
   const sentimentDetails = r => {
     const s = sentimentView(r);
     const names = {stock: "Stock momentum", sector: "Sector momentum", news: "News sentiment", social: "Social sentiment"};
-    return `<div class="detail-group detail-wide sentiment-details"><h4>Stock / sector sentiment · ${isNum(s.score) ? `${s.score}/100 · ${s.label}` : "Insufficient evidence"}</h4>` +
+    return `<div class="detail-group sentiment-details"><h4>Stock / sector sentiment · ${isNum(s.score) ? `${s.score}/100 · ${s.label}` : "Insufficient evidence"}</h4>` +
       `<p class="detail-text">${esc(s.method || "Sentiment was not collected in this saved report. Refresh data to collect it.")}</p>` +
       `<div class="sentiment-components">${s.components.map(c => `<article><h5>${esc(names[c.key] || c.key)} <span>${isNum(c.score) ? `${nf0.format(c.score)}/100` : c.stale ? "Stale · excluded" : "Unavailable"}</span></h5>` +
         `<p>${esc(c.detail)}</p><p class="sentiment-meta">Base weight ${esc(c.weight)}%${isNum(c.score) && isNum(s.score) ? ` · effective ${nf0.format(c.weight / s.coverage * 100)}%` : ""}` +
@@ -741,7 +741,8 @@
     if (r.iv_price_context) observed.unshift(["This stock", esc(r.iv_price_context.label) +
       `<span class="sub context-evidence">${esc(r.iv_price_context.detail)}</span>`]);
     return `<tr class="detail"><td colspan="18"><div class="detail-grid">` +
-      sentimentDetails(r) +
+      (r.summary ? `<div class="detail-group detail-wide"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
+      `<div class="detail-row">` +
       group("Company", [
         ["HQ", esc(r.country || "—")],
         ["Sector", esc(r.sector || "—")],
@@ -760,7 +761,7 @@
           : r.iv_news_status === "empty" ? [["News coverage", "No usable headlines returned"]] : []),
       ]) +
       // Beside Why this IV, filling the room those columns leave, so only the charts sit at the foot of a row.
-      (r.summary ? `<div class="detail-group detail-summary"><h4>What the business does</h4><p class="detail-text">${esc(r.summary)}</p></div>` : "") +
+      sentimentDetails(r) + `</div>` +
       (structural.length ? group("Structural context · possible sensitivities", structural.concat([
         ["Interpretation", "Business exposure can help explain recurring volatility, but does not establish the cause of this session’s IV. Profile classifications are based on the cached business description; truncated or missing descriptions can leave gaps."],
       ]), "detail-wide context-details") : "") +

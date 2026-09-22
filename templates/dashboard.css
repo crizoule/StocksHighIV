@@ -521,10 +521,12 @@ th.col-stock { z-index: 2; }
 .detail-group dd { margin: 0; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
 .detail-group a { color: var(--accent-ink); text-underline-offset: 2px; }
 .detail-wide { grid-column: 1 / -1; }
-.detail-summary .detail-text { font-size: 12px; line-height: 1.55; }
+/* The opening row keeps its own proportions, so widening sentiment never narrows the data groups below. */
+.detail-row { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 6px 32px; align-items: start; }
 .context-details dl { grid-template-columns: minmax(100px, 190px) minmax(0, 1fr); line-height: 1.5; }
 .context-details dd { text-align: left; font-weight: 400; overflow-wrap: anywhere; }
 @media (max-width: 600px) {
+  .detail-row { grid-template-columns: minmax(0, 1fr); }
   .context-details dl { grid-template-columns: minmax(0, 1fr); }
   .context-details dt { margin-top: 6px; font-weight: 600; }
 }

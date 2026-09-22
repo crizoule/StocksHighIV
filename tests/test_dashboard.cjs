@@ -115,13 +115,14 @@ test('missing catalyst and unavailable news remain visible as uncertainty', () =
   assert.doesNotMatch(checked.expanded, /News coverage/);
 });
 
-test('the business description sits beside Why this IV, leaving the charts last', () => {
+test('the business description opens the details and sentiment sits beside Why this IV', () => {
   const { expanded } = renderEarnings(null, {summary: 'Test Company designs and sells widgets.', iv_why_as_of: '2026-09-18'});
   const at = (text) => expanded.indexOf(text);
-  assert.ok(at('What the business does') > at('WHY THIS IV') || at('What the business does') > at('Why this IV'));
-  assert.ok(at('What the business does') < at('Implied volatility') || at('Implied volatility') === -1);
-  assert.ok(at('What the business does') < at('class="mini-row"') || at('class="mini-row"') === -1);
-  assert.match(expanded, /class="detail-group detail-summary"><h4>What the business does<\/h4><p class="detail-text">Test Company designs/);
+  assert.match(expanded, /class="detail-group detail-wide"><h4>What the business does<\/h4><p class="detail-text">Test Company designs/);
+  assert.ok(at('What the business does') < at('Why this IV'));
+  assert.ok(at('Why this IV') < at('Stock / sector sentiment'));  // sentiment follows, two columns wide
+  assert.match(expanded, /class="detail-row"><div class="detail-group "><h4>Company/);  // one row: company, why, sentiment
+  assert.ok(at('Stock / sector sentiment') < at('class="mini-row"') || at('class="mini-row"') === -1);
 });
 
 test('possible events retain source links and escaped full evidence', () => {

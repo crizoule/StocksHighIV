@@ -68,6 +68,20 @@ class AppTests(unittest.TestCase):
             self.app.download('resume')
             self.assertNotIn('--refresh-quotes', run.call_args.args[0])
 
+    def test_provider_credentials_come_from_the_data_folder(self):
+        self.assertEqual(self.app.credentials(), {})  # nothing configured
+        (self.app.data_root/'data').mkdir(parents=True, exist_ok=True)
+        (self.app.data_root/'data/credentials.env').write_text(
+            "# provider credentials\nALPHAVANTAGE_API_KEY = KEY123 \nSTOCKTWITS_USERNAME=\"someone\"\n"
+            "STOCKTWITS_PASSWORD=\nPATH=/tmp/evil\nnonsense\n", encoding="utf-8")
+        self.assertEqual(self.app.credentials(), {"ALPHAVANTAGE_API_KEY": "KEY123", "STOCKTWITS_USERNAME": "someone"})
+        with patch('highiv.app.subprocess.Popen', side_effect=RuntimeError("stop")) as popen:
+            with self.assertRaises(RuntimeError):
+                self.app.run_process(['true'])
+        env = popen.call_args.kwargs['env']
+        self.assertEqual(env['ALPHAVANTAGE_API_KEY'], 'KEY123')
+        self.assertNotEqual(env['PATH'], '/tmp/evil')  # only the documented names are read
+
     def test_setup_failure_is_recoverable_and_does_not_download(self):
         with patch.object(self.app, 'run_process', side_effect=RuntimeError('pip failed')):
             self.app.setup()
