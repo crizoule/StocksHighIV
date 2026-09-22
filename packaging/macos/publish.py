@@ -41,11 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''News sentiment now covers more of the screen. Alpha Vantage's shared feed carries the last day of national news, which is mostly large companies, so most high-IV leaders scored nothing. Articles are now kept for seven days, and each refresh spends the rest of the free daily allowance on individual leaders, split evenly between the two cap bands, asking first about tickers that already carry an article or two. On a live run, ten requests lifted eight more rows into a news score.
+    notes = '''Expanded rows no longer leave a void beside the sentiment panel. The details now split into a data side and a panel side, so both columns carry their share and a row is about 1,550 pixels instead of 1,792 — the difference is largest on stocks that actually have a news score.
 
-Saved dashboards no longer grow without limit: archived days are gzipped and the last 30 are kept, holding the folder at about 145 MB instead of adding 13 MB every trading day. Your existing snapshots are compressed on the next refresh.
-
-In an expanded row, the business description moves under Company and Why this IV, filling the space beside the taller sentiment panel and shortening the row.
+A feed you have no credentials for is also left out of the row entirely, instead of repeating the same “not connected” notice on every stock. A feed that is connected but quiet today still shows, since that says something about the stock. The score is unchanged: it already reweights whatever is available and reports its coverage.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
