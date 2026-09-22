@@ -41,9 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The MACD histogram now stays on the long ranges. Below one pixel per session the bars used to disappear, which started at the 5-year range; they now group into weekly, monthly or quarterly bars, each keeping its last session's value, the way a weekly chart does, and the pane label says which. The MACD and signal lines stay at daily detail at every range.
+    notes = '''Expanded rows are shorter. The Notes and Timing blocks read the same for every stock and took 335 pixels, about a sixth of an expanded row's height. Both now appear once in “How to read this screen” at the foot of the page.
 
-No data changes, so no extra download.
+Nothing is lost: the full note for a row stays on its Why this IV cell as a tooltip, and a row whose news lookup failed or returned nothing still says so in its details. No data changes, so no extra download.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
