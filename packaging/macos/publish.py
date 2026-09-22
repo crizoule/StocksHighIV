@@ -41,9 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Expanded rows are shorter. The Notes and Timing blocks read the same for every stock and took 335 pixels, about a sixth of an expanded row's height. Both now appear once in “How to read this screen” at the foot of the page.
+    notes = '''An expanded row now opens with Company, Why this IV and What the business does side by side, and ends with its price charts. The description used to sit below the charts while the first row left a column empty, so the row is also a little shorter.
 
-Nothing is lost: the full note for a row stays on its Why this IV cell as a tooltip, and a row whose news lookup failed or returned nothing still says so in its details. No data changes, so no extra download.
+No data changes, so no extra download.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
