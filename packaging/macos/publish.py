@@ -41,9 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Expanded rows no longer leave a void beside the sentiment panel. The details now split into a data side and a panel side, so both columns carry their share and a row is about 1,550 pixels instead of 1,792 — the difference is largest on stocks that actually have a news score.
+    notes = '''COT positioning now matches the convention published COT charts use. Each group is measured against non-spreading open interest, since a spread position holds a long and a short in the same market and takes no side: of 2,446,519 E-mini contracts open, 576,228 are spreads, so asset managers read +48.4% instead of +37.0%. The history back to June 2006 is recomputed on the same basis.
 
-A feed you have no credentials for is also left out of the row entirely, instead of repeating the same “not connected” notice on every stock. A feed that is connected but quiet today still shows, since that says something about the stock. The score is unchanged: it already reweights whatever is available and reports its coverage.
+Dealers — the intermediaries on the other side, and a stock index's counterpart to the commercials panel of a commodity COT chart — are now drawn as a second line in the COT pane and carry their own three-year index on the card.
+
+The new figures appear after the next data refresh.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
