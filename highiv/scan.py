@@ -36,12 +36,12 @@ def load_universe(client, run_date: str, refresh: bool = False) -> list[dict]:
 def settled_since(client, limiter: net.RateLimiter, now: datetime) -> dict[str, str | None]:
     """Per source, the earliest download time (UTC) whose quotes are still final; None while quotes can change.
 
-    A quote fetched after its session settled stays final until the next session trades. For Cboe, SPY's quote
-    date tells which session is the latest, so market holidays need no calendar; the Montreal Exchange page
-    has no reliable session date, so it follows the weekday calendar.
+    A quote fetched after its session settled stays final until the next session trades. SPY's quote date says
+    which session Cboe is serving, whatever the clock says: market holidays need no calendar, and a feed still
+    serving yesterday during today's session is not downloaded again for 2,400 symbols that cannot have moved.
+    The Montreal Exchange page has no reliable session date, so it follows the weekday calendar and is trusted
+    only while the market is closed.
     """
-    if market.is_open(now):
-        return {"cboe": None, "mx": None}
     try:
         probe = iv.cboe_iv30(client, limiter, "SPY")
     except (net.FetchError, ValueError, TypeError, KeyError, OverflowError):
@@ -50,7 +50,7 @@ def settled_since(client, limiter: net.RateLimiter, now: datetime) -> dict[str, 
     day, next_open = market.last_session(now)
     stamp = lambda day: market.settled_at(day).astimezone(timezone.utc).isoformat(timespec="seconds")
     return {"cboe": stamp(date.fromisoformat(session)) if session else None,
-            "mx": stamp(day) if now < next_open else None}
+            "mx": stamp(day) if now < next_open and not market.is_open(now) else None}
 
 
 def priority(stocks: list[dict], previous: dict[str, float | None], watched: set[str]) -> set[str]:
@@ -105,7 +105,8 @@ def scan(run_date: str | None = None, refresh_universe: bool = False, refresh_qu
                 if later:
                     log(f"Priority pass: {len(todo)} likely leaders first; {len(later)} lower-IV stocks follow after a preliminary dashboard")
         if reused:
-            log(f"Reusing {len(reused)} quotes downloaded after the last close, {len(todo)} to download")
+            serving = (settled.get("cboe") or "")[:10]
+            log(f"Reusing {len(reused)} quotes already final for the {serving} session Cboe is serving, {len(todo)} to download")
         if done:
             log(f"Resuming: {len(done)} already scanned today, {len(todo)} to go")
 

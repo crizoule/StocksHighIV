@@ -125,8 +125,12 @@ class SettledTests(unittest.TestCase):
             # A Monday holiday: SPY still shows Friday, so Friday's quotes stay final; the calendar expects a session.
             self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 18)),
                              {"cboe": "2026-09-18T20:30:00+00:00", "mx": "2026-09-21T20:30:00+00:00"})
-            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 11)), {"cboe": None, "mx": None})  # trading
-            self.assertEqual(probe.call_count, 2)  # no probe while the market is open
+            # Mid-session, with Cboe still serving Friday: its quotes cannot have moved, so they are not fetched again.
+            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 11)),
+                             {"cboe": "2026-09-18T20:30:00+00:00", "mx": None})
+            probe.return_value = {**QUOTE, "quote_date": "2026-09-21"}  # the feed has caught up to today
+            self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 11))["cboe"], "2026-09-21T20:30:00+00:00")
+            self.assertEqual(probe.call_count, 4)
             probe.side_effect = net.FetchError("offline")
             self.assertIsNone(scan.settled_since(None, None, at(2026, 9, 19, 12))["cboe"])
 

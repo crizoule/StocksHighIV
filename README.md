@@ -131,8 +131,11 @@ cd ~/StocksHighIV
 Scans resume completed symbols and retry failed requests. A valid response with no usable IV
 counts as completed. Quotes downloaded after a session settled (4:30 PM ET) cannot change until the next
 session trades, so later runs copy them instead of asking Cboe again: an evening, weekend or next-morning
-refresh takes seconds. One Cboe request for SPY tells whether a new session has traded, which also covers
-exchange holidays; Montréal Exchange quotes follow the weekday calendar. Likewise, the build keeps leaders
+refresh takes seconds. One Cboe request for SPY says which session Cboe is serving, whatever the clock
+reads — that covers exchange holidays, and a feed still serving yesterday during today's session, which
+happens: on 2026-09-23 Cboe's delayed quotes stayed on the previous close from the open until at least
+1:30 PM ET, so a refresh would have re-downloaded 2,248 identical quotes. Montréal Exchange quotes have no
+reliable session date, so they follow the weekday calendar and are reused only while the market is closed. Likewise, the build keeps leaders
 enriched after the same close (refreshing only headlines, borrow terms and the earnings countdown) and
 enriches new ones four at a time. To replace quotes from an earlier run on the same day (for example, after
 the close following a morning scan), use:
