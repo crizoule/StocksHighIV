@@ -320,11 +320,12 @@ class MacroTests(unittest.TestCase):
 
     def test_cot_reads_asset_manager_positioning_with_a_three_year_index(self):
         start = date(2023, 9, 19)
-        def rows(code, asset_net, lev_net=-50):
+        def rows(code, asset_net, lev_net=-50, dealer_net=-100, spread=100):
             return [{"cftc_contract_market_code": code, "report_date_as_yyyy_mm_dd": f"{start + timedelta(weeks=i)}T00:00:00.000",
-                     "open_interest_all": "1000", "asset_mgr_positions_long": str(100 + max(net, 0)),
-                     "asset_mgr_positions_short": str(100 + max(-net, 0)),
-                     "lev_money_positions_long": "100", "lev_money_positions_short": str(100 - lev_net)} for i, net in enumerate(asset_net)]
+                     "open_interest_all": "1100", "asset_mgr_positions_spread": str(spread),  # 1,000 non-spreading
+                     "asset_mgr_positions_long": str(100 + max(net, 0)), "asset_mgr_positions_short": str(100 + max(-net, 0)),
+                     "lev_money_positions_long": "100", "lev_money_positions_short": str(100 - lev_net),
+                     "dealer_positions_long_all": "100", "dealer_positions_short_all": str(100 - dealer_net)} for i, net in enumerate(asset_net)]
         weeks = s.COT_LOOKBACK
         data = rows("13874A", [i for i in range(weeks - 1)] + [400]) + rows("1170E1", [-i for i in range(weeks)])
         data.append({"cftc_contract_market_code": "13874A", "report_date_as_yyyy_mm_dd": "2030-01-01T00:00:00.000"})  # malformed: skipped
@@ -334,6 +335,9 @@ class MacroTests(unittest.TestCase):
         self.assertEqual((item["signal"], item["direction"]), ("Institutions heavily long", 1))
         spx, vix = item["groups"]
         self.assertEqual((spx["leveraged"], spx["leveraged_index"]), (-50, 0))  # never above its own past: ranks 0
+        self.assertEqual(spx["dealers"], -100)  # the other side of the market, shown as the chart's second line
+        self.assertEqual(spx["open_interest"], 1000)  # spread positions take no side and are excluded
+        self.assertEqual(item["dealer_history"][-1], [(start + timedelta(weeks=weeks - 1)).isoformat(), -10.0])
         self.assertEqual((vix["name"], vix["asset_managers"], vix["asset_managers_index"]), ("VIX futures", -155, 0))
         self.assertEqual(len(item["history"]), weeks)
         self.assertNotIn("history", spx)

@@ -147,7 +147,8 @@
   const contracts = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf0.format(Math.abs(v))}`;
   const cotIndex = (v) => isNum(v) ? ` · index ${nf0.format(v)}` : "";
   const cotRows = (c) => (c.groups || []).map((g, i) => `<p class="sentiment-meta">${i ? `${esc(g.name)} · asset managers` : "Asset managers"} ` +
-    `${esc(contracts(g.asset_managers))}${esc(cotIndex(g.asset_managers_index))} · leveraged funds ${esc(contracts(g.leveraged))}${esc(cotIndex(g.leveraged_index))}</p>`).join("");
+    `${esc(contracts(g.asset_managers))}${esc(cotIndex(g.asset_managers_index))} · leveraged funds ${esc(contracts(g.leveraged))}${esc(cotIndex(g.leveraged_index))}` +
+    (isNum(g.dealers) ? ` · dealers ${esc(contracts(g.dealers))}${esc(cotIndex(g.dealers_index))}` : "") + `</p>`).join("");
   const renamed = (name) => name === "CNN Fear & Greed" ? "Fear & Greed" : name;  // reports saved before 1.6.0
   const renderMacro = () => {
     const defaults = [
@@ -210,7 +211,8 @@
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
     rsi: { short: "RSI 14", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: gains balance losses", derived: true },
     macd: { short: "MACD", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", histogram: true, derived: true },
-    cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: net flat" },
+    cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0,
+           refLabel: "line at 0: net flat", second: "dealers" },
   };
   const monthsBack = (t, years, months) => {
     if (years === undefined) return MACRO_EARLIEST;

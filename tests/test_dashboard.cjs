@@ -367,7 +367,9 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
     vix: {name: 'VIX', frequency: 'daily', source: 'Cboe', points: tracking},
     put_call: {name: 'Equity put/call, 5-day average', frequency: 'daily', source: 'Cboe', points: []},
     fear_greed: {name: 'CNN Fear & Greed', frequency: 'daily', source: 'CNN', points: []},
-    cot: {name: "COT: asset managers' net, % of open interest", frequency: 'weekly', source: 'CFTC', points: spx.filter((_, i) => i % 5 === 1).map(([d, v]) => [d, (6000 - v) / 100])},
+    cot: {name: "COT: asset managers' net, % of non-spreading open interest", frequency: 'weekly', source: 'CFTC',
+          points: spx.filter((_, i) => i % 5 === 1).map(([d, v]) => [d, (6000 - v) / 100]),
+          signal: spx.filter((_, i) => i % 5 === 1).map(([d, v]) => [d, (v - 6000) / 120])},  // dealers take the other side
     rsi: {name: 'RSI 14', frequency: 'daily', source: 'Computed from S&P 500 daily closes', points: spx.map(([d, v]) => [d, 50 + (v % 40) / 4])},
     macd: {name: 'MACD 12/26/9, % of index', frequency: 'daily', source: 'Computed from S&P 500 daily closes',
            points: spx.map(([d, v]) => [d, (v % 20) / 10 - 1]),
@@ -417,24 +419,28 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(plot(), /No Equity put\/call, 5-day average data in this range/);
   app.click('macro-series-seg', 'mseries', 'cot');
   assert.match(plot(), /COT net<tspan class="ref-label"> · line at 0: net flat<\/tspan>/);
-  assert.match(app.element('macro-legend').innerHTML, /COT: asset managers&#39; net, % of open interest −[\d.]+% · Sep 15/);
+  assert.match(plot(), /class="line-ind2" d="M/);  // dealers drawn beside asset managers
+  assert.match(app.element('macro-legend').innerHTML, /key-ind2[^>]*><\/i>dealers [+−][\d.]+%/);
+  assert.doesNotMatch(plot(), /class="hist /);  // no histogram: that is MACD's
+  assert.match(app.element('macro-legend').innerHTML, /COT: asset managers&#39; net, % of non-spreading open interest −[\d.]+% · Sep 15/);
   const empty = renderEarnings(null, {}, {macro: {cards: []}});
   assert.match(empty.element('macro-plot').innerHTML, /S&amp;P 500 history appears after the next data refresh/);
 });
 
 test('COT card shows leveraged funds and asset managers for the S&P 500 and VIX futures', () => {
-  const cot = {key: 'cot', name: 'COT positioning', status: 'ok', as_of: '2026-09-15', max_age: 14, value: 37, reading: '+37.0% of OI',
+  const cot = {key: 'cot', name: 'COT positioning', status: 'ok', as_of: '2026-09-15', max_age: 14, value: 48.4, reading: '+48.4% of OI',
     signal: 'Typical positioning', direction: 0, index: 72, detail: 'CFTC Traders in Financial Futures',
-    groups: [{name: 'E-mini S&P 500', leveraged: -293143, leveraged_index: 72, asset_managers: 904684, asset_managers_index: 34},
+    groups: [{name: 'E-mini S&P 500', leveraged: -293143, leveraged_index: 72, asset_managers: 904684, asset_managers_index: 34,
+              dealers: -702938, dealers_index: 12},
              {name: 'VIX futures', leveraged: -16504, leveraged_index: 70, asset_managers: -52658, asset_managers_index: 1}]};
   const app = renderEarnings(null, {}, {macro: {cards: [cot]}});
   const card = app.element('macro-cards').innerHTML;
-  assert.match(card, /<h3>COT positioning<\/h3><div class="macro-value">\+37.0% of OI/);
-  assert.match(card, /Asset managers \+904,684 · index 34 · leveraged funds −293,143 · index 72/);
+  assert.match(card, /<h3>COT positioning<\/h3><div class="macro-value">\+48.4% of OI/);
+  assert.match(card, /Asset managers \+904,684 · index 34 · leveraged funds −293,143 · index 72 · dealers −702,938 · index 12/);
   assert.match(card, /VIX futures · asset managers −52,658 · index 1 · leveraged funds −16,504 · index 70/);
   assert.match(app.element('macro-note').textContent, /^1\/5 fresh readings/);
   app.click('macro-toggle');
-  assert.match(app.element('macro-oneline').innerHTML, /<b>COT<\/b> \+37.0% of OI · Typical positioning/);
+  assert.match(app.element('macro-oneline').innerHTML, /<b>COT<\/b> \+48.4% of OI · Typical positioning/);
 });
 
 test('macro panel collapses to one line of readings, and the S&P 500 can use a log scale', () => {
