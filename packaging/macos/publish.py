@@ -41,11 +41,13 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''COT positioning now matches the convention published COT charts use. Each group is measured against non-spreading open interest, since a spread position holds a long and a short in the same market and takes no side: of 2,446,519 E-mini contracts open, 576,228 are spreads, so asset managers read +48.4% instead of +37.0%. The history back to June 2006 is recomputed on the same basis.
+    notes = '''Fixes Install and Relaunch appearing to do nothing on Mac. The app postponed the install until a running market-data download finished, which can take an hour, and said so nowhere except the dashboard page.
 
-Dealers — the intermediaries on the other side, and a stock index's counterpart to the commercials panel of a commodity COT chart — are now drawn as a second line in the COT pane and carry their own three-year index on the card.
+It now asks: install when the download finishes, or stop the download and install now — a stopped scan resumes where it left off the next time you download. The launcher window also reports that an update is waiting.
 
-The new figures appear after the next data refresh.
+An unreachable local server used to count as “still busy”, so a crashed or displaced server postponed the update forever with no download running at all. That now installs immediately, since there is nothing left to interrupt.
+
+This logic lives in the installed app, so it governs the updates after this one.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
