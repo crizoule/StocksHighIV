@@ -9,6 +9,10 @@ function app(){const elements=new Map();const get=id=>{if(!elements.has(id))elem
 const state={token:'token',status:'running',phase:'scan',ready:true,total:100,completed:25,rate:50,eta:90,elapsed:30,last_activity_seconds:2,logs:['Checking TEST'],with_iv:20,errors:2,reused:0,has_dashboard:true,activity:'Downloading TEST'};
 test('live scan shows measured pace, counts, ETA and keeps saved report accessible',()=>{const a=app();a.render(state);assert.equal(a.get('bar').value,25);assert.match(a.get('counts').textContent,/25 \/ 100/);assert.equal(a.get('rate').textContent,'50.0');assert.equal(a.get('eta').textContent,'1m 30s');assert.equal(a.get('refresh').disabled,true);assert.equal(a.get('dashboard').hidden,false);assert.match(a.get('quality').textContent,/2 failed requests/);});
 test('enrichment never invents a percentage or ETA',()=>{const a=app();a.render({...state,phase:'enrich',total:null,completed:12,eta:null});assert.equal(a.get('bar').value,undefined);assert.equal(a.get('eta').textContent,'—');assert.match(a.get('counts').textContent,/12 companies enriched/);});
+test('a pending update says it is waiting for the download instead of staying silent',()=>{const a=app();a.render(state);assert.equal(a.get('update-waiting').hidden,true);
+  a.render({...state,update_waiting:true});assert.equal(a.get('update-waiting').hidden,false);assert.match(a.get('update-waiting').textContent,/installs as soon as this download finishes/);
+  a.render({...state,status:'done',update_waiting:true});assert.match(a.get('update-waiting').textContent,/ready to install/);});
+
 test('failed first setup offers retry and no unavailable dashboard',()=>{const a=app();a.render({...state,status:'error',phase:'setup',ready:false,has_dashboard:false});assert.equal(a.get('setup').hidden,false);assert.equal(a.get('refresh').hidden,true);assert.equal(a.get('dashboard').hidden,true);assert.equal(a.get('log-details').open,true);});
 const controlsScript=fs.readFileSync(path.join(__dirname,'../templates/app-controls.js'),'utf8');
 test('saved dashboard remains visible and completion notifies once',async()=>{

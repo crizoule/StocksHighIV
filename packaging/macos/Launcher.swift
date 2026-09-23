@@ -22,7 +22,10 @@ final class Launcher: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
         return true
     }
 
-    func updateBackend(_ action: String, completion: @escaping (Bool) -> Void) {
+    // Whether the running app is free to be replaced. Unreachable counts as free: there is nothing left to protect.
+    enum Readiness { case ready, busy, unreachable }
+
+    func updateBackend(_ action: String, completion: @escaping (Readiness) -> Void) {
         let base = "http://127.0.0.1:8932"
         var request = URLRequest(url: URL(string: base + "/api/status")!)
         request.timeoutInterval = 5
@@ -30,7 +33,7 @@ final class Launcher: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             guard let data, let status = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   status["identity"] as? String == self.backendIdentity,
                   let token = status["token"] as? String else {
-                DispatchQueue.main.async { completion(false) }; return
+                DispatchQueue.main.async { completion(.unreachable) }; return
             }
             var post = URLRequest(url: URL(string: base + "/api/" + action)!)
             post.httpMethod = "POST"; post.timeoutInterval = 5; post.httpBody = Data("{}".utf8)
@@ -39,24 +42,47 @@ final class Launcher: NSObject, NSApplicationDelegate, SPUUpdaterDelegate {
             post.setValue("application/json", forHTTPHeaderField: "Content-Type")
             URLSession.shared.dataTask(with: post) { data, response, _ in
                 let result = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
-                let ready = (response as? HTTPURLResponse)?.statusCode == 200 && result?["ready"] as? Bool == true
-                DispatchQueue.main.async { completion(ready) }
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    DispatchQueue.main.async { completion(.unreachable) }; return
+                }
+                DispatchQueue.main.async { completion(result?["ready"] as? Bool == true ? .ready : .busy) }
             }.resume()
         }.resume()
     }
 
-    func reserveUpdate() {
-        updateBackend("prepare-update") { ready in
-            guard self.pendingInstall != nil else {
+    func reserveUpdate(afterAsking: Bool = false) {
+        updateBackend("prepare-update") { state in
+            guard let install = self.pendingInstall else {
                 self.updateBackend("cancel-update") { _ in }; return
             }
-            if ready {
-                let install = self.pendingInstall
+            switch state {
+            case .ready, .unreachable:  // idle, or no running app left to interrupt
                 self.pendingInstall = nil
-                install?()
-            } else {
-                self.updateTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in self.reserveUpdate() }
+                install()
+            case .busy where afterAsking:
+                self.updateTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in self.reserveUpdate(afterAsking: true) }
+            case .busy:
+                self.askAboutRunningDownload()  // otherwise the click looks like it did nothing
             }
+        }
+    }
+
+    func askAboutRunningDownload() {
+        let alert = NSAlert()
+        alert.messageText = "A market data download is running"
+        alert.informativeText = "StocksHighIV installs the update as soon as the download finishes, which can take an hour. "
+            + "You can stop the download instead and install now: a scan resumes where it left off the next time you download."
+        alert.addButton(withTitle: "Install When Finished")
+        alert.addButton(withTitle: "Stop Download and Install Now")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn {
+            updateBackend("shutdown") { _ in
+                guard let install = self.pendingInstall else { return }
+                self.pendingInstall = nil
+                install()
+            }
+        } else {
+            updateTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in self.reserveUpdate(afterAsking: true) }
         }
     }
 
