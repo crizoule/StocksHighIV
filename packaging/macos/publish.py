@@ -41,13 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Fixes Install and Relaunch appearing to do nothing on Mac. The app postponed the install until a running market-data download finished, which can take an hour, and said so nowhere except the dashboard page.
+    notes = '''A refresh no longer re-downloads quotes that cannot have changed. Cboe's delayed feed sometimes stays on the previous close well into a trading day — on September 23 it did so from the open until at least 1:30 PM ET — and the app used to spend about 45 minutes fetching thousands of identical quotes because the market was nominally open.
 
-It now asks: install when the download finishes, or stop the download and install now — a stopped scan resumes where it left off the next time you download. The launcher window also reports that an update is waiting.
+A single request for SPY now decides which session Cboe is serving, whatever the clock reads. Measured against the live feed: 2,248 of 2,253 quotes reused, 5.5 seconds instead of about 41 minutes. When the feed has rolled to the current session, every quote is downloaded as before, since those move.
 
-An unreachable local server used to count as “still busy”, so a crashed or displaced server postponed the update forever with no download running at all. That now installs immediately, since there is nothing left to interrupt.
-
-This logic lives in the installed app, so it governs the updates after this one.
+Reuse needs quotes that are final, meaning downloaded after their own session's close, so the 4:30 PM ET schedule gets the most from it. Montréal Exchange quotes are unchanged: their page carries no reliable session date.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
