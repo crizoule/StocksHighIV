@@ -41,9 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The log now says when Cboe's delayed feed is behind the last close, naming the session it is serving and how many days back that is, so a refresh that reuses every quote reads as an explanation rather than a silent failure.
+    notes = '''A new Market leverage panel sits below Macro sentiment. It shows how much investors are borrowing, from six free public sources: FINRA margin debt, the Fed's Z.1 margin loans against US stock market value, hedge-fund leverage from the OFR's Form PF data, hedge funds' S&P 500 futures positions from the CFTC, trading in 3× leveraged ETFs as a daily retail proxy, and the Fed's Financial Stability Report.
 
-Measured on a stalled feed today: the first refresh of the day took 8 minutes 41 seconds, almost all of it the 168 Montréal quotes, which carry no reliable session date and are always fetched during market hours; later refreshes the same day took 1 minute 53 seconds.
+Each card gives the period its data covers, when that release came out, and when the next one is due: the publisher's own date where one is announced, otherwise an estimate from the source's usual rhythm, flagged as due once it passes. Readings are ranked against their own history, and the top fifth is marked elevated. Below the cards, the same S&P 500 chart as the sentiment panel plots any of seven leverage series, back to 1987 where the data reaches.
+
+On September 24 all six sources answered: margin debt $1.45T, up 37% in a year; hedge funds 2.57× gross assets to net assets, 8.59× counting derivatives, the highest in the OFR's series since 2013. The panel and both charts fill in on the first data refresh after updating.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
