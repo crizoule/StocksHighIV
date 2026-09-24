@@ -21,7 +21,7 @@ test('saved dashboard remains visible and completion notifies once',async()=>{
   let status={settings:{mode:'auto',time:'11:00'},token:'t',identity:'app',status:'running',phase:'scan',total:100,completed:25,eta:90,activity:'Checking stocks',has_dashboard:true,dashboard_saved_at:100};
   function Notice(title,options){notices.push({title,options});}Notice.permission='granted';
   const window={Notification:Notice,location:{href:'/'},dispatchEvent(){}};
-  const scope={document:{getElementById:get},CustomEvent:function(){},window,Notification:Notice,AbortSignal,localStorage:{getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v)},fetch:async()=>({ok:true,json:async()=>status}),setTimeout:fn=>{timer=fn;}};
+  const scope={document:{getElementById:get,addEventListener(){}},CustomEvent:function(){},window,Notification:Notice,AbortSignal,localStorage:{getItem:k=>store.get(k),setItem:(k,v)=>store.set(k,v)},fetch:async()=>({ok:true,json:async()=>status}),setTimeout:fn=>{timer=fn;}};
   vm.createContext(scope);vm.runInContext(controlsScript,scope);await new Promise(setImmediate);
   assert.equal(get('local-complete').hidden,true);assert.equal(get('local-saved').hidden,false);
   assert.match(get('local-progress').textContent,/IV scan 25%/);
@@ -31,4 +31,21 @@ test('saved dashboard remains visible and completion notifies once',async()=>{
   status={...status,status:'done',dashboard_saved_at:200,completion_id:'done1'};
   await timer();assert.equal(get('local-complete').hidden,false);assert.equal(notices.length,1);assert.equal(window.location.href,'/');
   await timer();assert.equal(notices.length,1);
+});
+
+test('watchlist and schedule sit in a menu that opens from the bar and closes on Escape or a click elsewhere',()=>{
+  const elements=new Map(),handlers={};
+  const get=id=>{if(!elements.has(id))elements.set(id,{id,dataset:{reportStamp:'0'},hidden:true,attributes:{},value:'',
+    setAttribute(k,v){this.attributes[k]=v;},contains(node){return node===this||node?.parent===this;},focus(){focused=this.id;},replaceChildren(){},appendChild(){}});return elements.get(id);};
+  let focused=null;
+  const scope={document:{getElementById:get,addEventListener:(type,fn)=>{handlers[type]=fn;}},CustomEvent:function(){},window:{dispatchEvent(){}},
+    AbortSignal,localStorage:{getItem(){return null;},setItem(){}},fetch:async()=>({ok:false}),setTimeout(){}};
+  vm.createContext(scope);vm.runInContext(controlsScript,scope);
+  const menu=get('local-menu'),toggle=get('local-menu-toggle');
+  assert.equal(menu.hidden,true);
+  toggle.onclick();assert.equal(menu.hidden,false);assert.equal(toggle.attributes['aria-expanded'],'true');
+  handlers.click({target:{parent:menu}});assert.equal(menu.hidden,false);  // using the watchlist form keeps it open
+  handlers.click({target:{}});assert.equal(menu.hidden,true);assert.equal(toggle.attributes['aria-expanded'],'false');
+  toggle.onclick();handlers.keydown({key:'Escape'});assert.equal(menu.hidden,true);assert.equal(focused,'local-menu-toggle');
+  toggle.onclick();toggle.onclick();assert.equal(menu.hidden,true);  // the button toggles
 });

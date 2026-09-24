@@ -5,6 +5,15 @@
   const initialStamp = Number(el('controls').dataset.reportStamp);
   const storageGet = key => { try { return localStorage.getItem(key); } catch { return null; } };
   const storageSet = (key, value) => { try { localStorage.setItem(key, value); } catch {} };
+  // Watchlist and schedule sit in a menu behind the button at the right of the bar; a click elsewhere or Escape closes it.
+  const setMenu = open => { el('menu').hidden = !open; el('menu-toggle').setAttribute('aria-expanded', String(open)); };
+  el('menu-toggle').onclick = () => setMenu(el('menu').hidden);
+  document.addEventListener('click', event => {
+    if (!el('menu').hidden && !el('menu').contains(event.target) && !el('menu-toggle').contains(event.target)) setMenu(false);
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !el('menu').hidden) { setMenu(false); el('menu-toggle').focus(); }
+  });
   function timeVisibility() {
     el('custom').hidden = el('preset').value !== 'custom';
   }
