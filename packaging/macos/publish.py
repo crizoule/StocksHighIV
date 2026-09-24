@@ -41,9 +41,7 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The Leverage tab now reads more leverage as more bullish, and leans on the data that updates daily. The label weighs ProShares' daily 3× fund data at 60%: net money into bull funds minus bear funds over 20 sessions (35%), and bull funds' share of those funds' assets (25%). FINRA's monthly margin debt carries 30%, and the slow quarterly and weekly sources 10% between them. A fund's flow counts only money moving in or out, not its gains, losses or reverse splits. Retail tends to add to bull funds on dips while a rally holds; when leveraged holders give up, bull funds' share of assets falls. Refresh your data once after updating to collect the new fund history.
-
-Watchlist and Download schedule & notifications now open from the ☰ menu at the right of the app bar, and the bar itself is much thinner.
+    notes = '''Fixes the Leverage tab showing "No reading · refresh data" for the two ProShares inputs, and reading Insufficient data, after updating to 3.2.0. A refresh within six hours of the update reused the leveraged-ETF data an older version had saved, which holds trading volume only. That older copy is now fetched again, so the first refresh after updating collects the fund flows and asset share.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
