@@ -198,6 +198,71 @@ class EtfTests(unittest.TestCase):
             lv.parse_etfs(frame)
 
 
+def proshares_file(symbol, days, nav, aum):
+    """ProShares' layout, newest first; shares outstanding in thousands."""
+    rows = ["Date,ProShares Name,Ticker,NAV,Prior NAV,NAV Change (%),NAV Change ($),Shares Outstanding (000),Assets Under Management"]
+    for d, n, a in reversed(list(zip(days, nav, aum))):
+        rows.append(f"{d:%m/%d/%Y},ProShares Test,{symbol},{n},{n},0,0,{a / n / 1000:.3f},{a}")
+    return "\n".join(rows) + "\n"
+
+
+def proshares_texts(sessions=900, new_shares=0.0, split=False):
+    """Each fund's assets are shares × NAV; bull funds gain `new_shares` a session over the last 20 (money arriving)."""
+    days = list(pd.bdate_range("2023-01-02", periods=sessions).date)
+    texts = {}
+    for bull, bear in lv.PROSHARES_PAIRS.values():
+        nav_b = [10 * 1.001 ** i for i in range(sessions)]
+        nav_s = [10 * 0.999 ** i for i in range(sessions)]
+        shares_b = [9e8 + new_shares * max(0, i - (sessions - lv.ETF_WINDOW) + 1) for i in range(sessions)]
+        aum_b = [s * n for s, n in zip(shares_b, nav_b)]
+        aum_s = [1e8 * n for n in nav_s]
+        if split:  # a 1-for-10 reverse split, applied to the whole history as ProShares does: NAV ×10, shares ÷10
+            nav_s = [n * 10 for n in nav_s]
+        texts[bull], texts[bear] = proshares_file(bull, days, nav_b, aum_b), proshares_file(bear, days, nav_s, aum_s)
+    return texts, days
+
+
+class ProSharesTests(unittest.TestCase):
+    def test_price_moves_and_splits_are_not_flows(self):
+        texts, days = proshares_texts(split=True)
+        frame = lv.etf_flows(lv.parse_proshares(texts))
+        self.assertAlmostEqual(frame["flows"].abs().max(), 0, places=6)
+        self.assertEqual(frame.index[-1], days[-1])
+        self.assertTrue(frame["share"].iloc[-1] > frame["share"].iloc[0])  # bull funds gain share as their NAV rises
+
+    def test_card_leads_with_flows_and_asset_share(self):
+        texts, days = proshares_texts(new_shares=5e6)
+        item = lv.parse_etfs_combined(lv.parse_proshares(texts))
+        self.assertEqual(item["as_of"], days[-1].isoformat())
+        self.assertEqual((item["frequency"], item["tone"]), ("daily", "high"))
+        self.assertTrue(item["signal"].startswith("Money entering bull funds"))
+        navs = [10 * 1.001 ** i for i in range(880, 900)]
+        expected = 4 * 5e6 * sum(navs)  # four bull funds, 5M new shares each session at that session's NAV
+        self.assertIn(f"bull funds +${expected / 1e9:.2f}B, bear funds +$0.00B", item["lines"][1])
+        self.assertIn("= +10.3% of assets", item["lines"][1])  # against the 20-session average of all eight funds' assets
+        self.assertIn("100th percentile since 2023", item["lines"][1])
+        self.assertEqual(set(item["series"]), {"etf_flows", "etf_share"})
+
+    def test_either_source_alone_still_gives_a_reading(self):
+        texts, _ = proshares_texts()
+        volume = {**lv.parse_etfs(etf_volume()), "status": "ok"}
+        both = lv.parse_etfs_combined(lv.parse_proshares(texts), volume)
+        self.assertEqual(set(both["series"]), {"etf_flows", "etf_share", "etf_bull", "etf_activity"})
+        self.assertTrue(both["lines"][2].endswith("(Yahoo volume, context)"))
+        self.assertIs(lv.parse_etfs_combined(None, volume), volume)  # flows unavailable: the volume card as before
+        with self.assertRaisesRegex(ValueError, "No leveraged ETF data"):
+            lv.parse_etfs_combined(None, None)
+        with self.assertRaisesRegex(ValueError, "Unrecognized ProShares"):
+            lv.parse_proshares({"TQQQ": "<html>blocked</html>"})
+
+    def test_fetch_survives_a_failed_proshares_download(self):
+        volume = lv.parse_etfs(etf_volume())
+        with patch.object(lv.sentiment, "request_text", side_effect=ValueError("Provider unavailable (HTTP 403)")), \
+                patch.object(lv, "fetch_volume", return_value=volume):
+            item = lv.fetch_etfs(None, NOW)
+        self.assertEqual(set(item["series"]), {"etf_bull", "etf_activity"})
+
+
 def cot(**extra):
     history = [[(date(2023, 9, 19) + timedelta(weeks=i)).isoformat(), -10.0 - i / 100] for i in range(160)]
     return {"status": "ok", "as_of": history[-1][0], "fetched_at": NOW.isoformat(), "leveraged_history": history,
@@ -249,7 +314,7 @@ class EvaluateTests(unittest.TestCase):
         with TemporaryDirectory() as temp, patch.object(lv.sentiment.config, "DATA_DIR", Path(temp)), \
                 patch.multiple(lv, fetch_finra=lambda client: fetched["finra"], fetch_z1=lambda client: fetched["z1"],
                                fetch_ofr=lambda client: fetched["ofr"], fetch_fsr=lambda client, today: fetched["fsr"],
-                               fetch_etfs=lambda now: fetched["etf"]):
+                               fetch_etfs=lambda client, now: fetched["etf"]):
             items = lv.collect(NOW)
             self.assertEqual({k: v["status"] for k, v in items.items()},
                              {"finra": "ok", "z1": "ok", "ofr": "ok", "fsr": "unavailable", "etf": "ok"})

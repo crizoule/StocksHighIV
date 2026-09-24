@@ -29,7 +29,7 @@
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
     if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot", "rsi", "macd"].includes(saved.mseries)) state.mseries = saved.mseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
-    if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_bull", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
+    if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_flows", "etf_share", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.lrange)) state.lrange = saved.lrange;
     if (saved && PAGES.includes(saved.page)) state.page = saved.page;
     if (saved) { state.mlog = saved.mlog === true; state.llog = saved.llog === true; }
@@ -288,34 +288,34 @@
       return { ...s, score, reading: c ? c.reading : "No fresh reading", as_of: c?.as_of, pct: c && s.series && isNum(score) ? ranked(s.series, c.value) : null };
     });
   };
-  // Leverage near the top of its own history is fragility: the higher the percentile, the more bearish.
+  // More leverage is more money betting on stocks: the higher a measure sits in its own history, the more bullish.
+  // The daily retail data (ProShares 3× fund flows and assets) carries 60%, FINRA's monthly margin debt 30%, and
+  // the slow quarterly and weekly sources 10% between them, as context.
   const LEVER_MAX_AGE = { daily: 7, weekly: 21, monthly: 75, quarterly: 200 };
+  const SIGNED = ["finra", "cot_lev", "etf_flows"];  // changes, flows and net positions carry a sign
   const shown = (key, unit, v) => unit === "×" ? `${nf2.format(v)}×` : unit !== "%" ? nf2.format(v)
-    : ["finra", "cot_lev"].includes(key) ? signedFmt(1, "%")(v) : `${nf1.format(v)}%`;  // changes and net positions carry a sign
+    : SIGNED.includes(key) ? signedFmt(1, "%")(v) : `${nf1.format(v)}%`;
   const leverParts = () => {
     const cards = DATA.market_leverage?.cards || [], series = DATA.market_leverage?.series || {};
     const spec = [
-      { key: "finra", card: "finra", name: "Margin debt, 12-month change (FINRA)", weight: 25 },
-      { key: "z1", card: "z1", name: "Margin loans ÷ stock market value (Fed Z.1)", weight: 15 },
-      { key: "ofr", card: "ofr", name: "Hedge fund balance-sheet leverage (OFR)", weight: 15 },
-      { key: "ofr_gne", card: "ofr", name: "Hedge fund leverage incl. derivatives (OFR)", weight: 10 },
-      { key: "cot_lev", card: "cot", name: "Leveraged funds in S&P futures (CFTC, 3 years)", weight: 10, window: 156, crowding: true },
-      { key: "etf_activity", card: "etf", name: "3× ETF volume vs SPY + QQQ", weight: 15 },
-      { key: "etf_bull", card: "etf", name: "3× ETF bull share", weight: 10 },
+      { key: "etf_flows", card: "etf", name: "Net money into 3× bull minus bear funds, 20 sessions (ProShares)", weight: 35 },
+      // Bull funds grew from about 43% to over 90% of these assets since 2010, so they are ranked within 3 years.
+      { key: "etf_share", card: "etf", name: "Bull funds' share of 3× fund assets (ProShares)", weight: 25, window: 756 },
+      { key: "finra", card: "finra", name: "Margin debt, 12-month change (FINRA)", weight: 30 },
+      { key: "ofr_gne", card: "ofr", name: "Hedge fund leverage incl. derivatives (OFR)", weight: 4 },
+      { key: "z1", card: "z1", name: "Margin loans ÷ stock market value (Fed Z.1)", weight: 3 },
+      { key: "cot_lev", card: "cot", name: "Leveraged funds' net S&P futures (CFTC)", weight: 3, window: 156 },
     ];
     return spec.map((s) => {
       const c = cards.find((x) => x.key === s.card) || {}, values = seriesValues(series[s.key]?.points), last = values[values.length - 1];
       const maxAge = LEVER_MAX_AGE[c.frequency] || 7;
       const fresh = ["ok", "cached"].includes(c.status) && last && sentimentFresh(last[0], maxAge);
       const window = s.window ? values.slice(-s.window) : values;
-      const pct = fresh ? pctRank(window.map((p) => p[1]), last[1]) : null;
-      // Leveraged funds can crowd either way (a deep net short is often a borrowed-money basis trade), so distance from the middle counts.
-      const score = isNum(pct) ? clamp1(s.crowding ? -Math.abs(pct - 50) / 50 : -(pct - 50) / 50) : null;
-      const unit = series[s.key]?.unit || "";
-      return { ...s, score, pct: s.crowding ? null : pct, as_of: last?.[0],
-               rule: s.crowding ? "50th percentile = 0; either extreme = −1" : "50th percentile = 0; 100th = −1, 0th = +1",
+      const pct = fresh ? pctRank(window.map((p) => p[1]), last[1]) : null, unit = series[s.key]?.unit || "";
+      return { ...s, score: isNum(pct) ? clamp1((pct - 50) / 50) : null, pct, as_of: last?.[0],
+               rule: `50th percentile = 0; 100th = +1, 0th = −1${s.window ? "; ranked within 3 years" : ""}`,
                reading: fresh ? `${shown(s.key, unit, last[1])} · ${ordinal(Math.round(pct))} pct${s.window ? " (3 yr)" : ""}`
-                 : !["ok", "cached"].includes(c.status) ? "Unavailable" : last ? "Stale" : "No reading" };
+                 : !["ok", "cached"].includes(c.status) ? "Unavailable" : last ? "Stale" : "No reading · refresh data" };
     });
   };
   // Searches: more attention to recession, crashes or war reads bearish. Quiet searches cap below the Bullish band
@@ -341,7 +341,8 @@
   };
   const VERDICT_TEXT = {
     sentiment: { scale: "bearish mood … bullish mood", method: "The label describes the current mood across five crowds: options traders pricing volatility (VIX), individual investors (AAII), institutions' futures positions (COT), options volume (put/call) and CNN's composite. VIX and AAII measure different people directly and get the most weight; Fear & Greed counts less because it is partly built from VIX and put/call. Extreme readings are often read contrarian; this label reports the mood, not a forecast." },
-    leverage: { scale: "high leverage (bearish) … low leverage (bullish)", method: "Each measure is ranked against its own history. The higher the percentile, the more borrowed money is in the market, and the harder a selloff can hit when it unwinds, so the reading is scored bearish. Leveraged funds' futures positions count as bearish at either extreme, since a deep net short is often a borrowed-money basis trade. Leverage can stay high for years: this is risk, not timing." },
+    leverage: { scale: "less leverage (bearish) … more leverage (bullish)", method: "More leverage means more borrowed or leveraged money betting on stocks, so a measure high in its own history reads bullish. The weighting favours what updates often: ProShares' daily 3× fund data carries 60% (net flows 35%, bull funds' share of assets 25%), FINRA's monthly margin debt 30%, and the quarterly OFR and Fed Z.1 figures and weekly CFTC positions 10% between them. Retail tends to add to bull funds on dips while a rally holds, so heavy inflows can arrive during a selloff; when leveraged holders give up, bull funds' share of assets falls. The same leverage makes a selloff sharper if it unwinds." },
+
     searches: { scale: "rising worry (bearish) … quiet (up to leaning bullish)", method: "Six Google searches from the USA, equally weighted: rising attention to recession, layoffs, inflation, bank failures, crashes or war scores bearish. Each term blends its latest week against the eight before it (60%) with its latest month's rank since 2004 (40%). Quiet searches score at most +0.4, because low attention does not mean optimism, so this tab never reads fully Bullish." },
   };
   const renderVerdict = (key, parts) => {
@@ -440,7 +441,8 @@
     ofr: { short: "Hedge fund leverage", fmt: (v) => `${nf2.format(v)}×`, ref: null },
     ofr_gne: { short: "Hedge funds incl. derivatives", fmt: (v) => `${nf2.format(v)}×`, ref: null },
     cot_lev: { short: "Leveraged funds net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat" },
-    etf_bull: { short: "3× ETF bull share", fmt: (v) => `${nf1.format(v)}%`, ref: 50, refLabel: "line at 50: bull and bear volume equal" },
+    etf_flows: { short: "3× net flows, % of assets", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: as much money in as out" },
+    etf_share: { short: "Bull share of 3× assets", fmt: (v) => `${nf1.format(v)}%`, ref: 50, refLabel: "line at 50: as much in bull as bear funds" },
     etf_activity: { short: "3× ETF volume ÷ SPY + QQQ", fmt: (v) => `${nf1.format(v)}%`, ref: null },
   };
   const monthsBack = (t, years, months) => {

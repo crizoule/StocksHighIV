@@ -16,6 +16,7 @@ from email.utils import parsedate_to_datetime
 
 import httpx
 import openpyxl
+import pandas as pd
 import yfinance as yf
 
 from . import context, fear_greed, progress, sentiment
@@ -37,6 +38,12 @@ FSR_FILES = "https://www.federalreserve.gov/publications/files/"
 ETF_PAIRS = {"Nasdaq-100": ("TQQQ", "SQQQ"), "S&P 500": ("UPRO", "SPXU"), "S&P 500 · Direxion": ("SPXL", "SPXS"),
              "Semiconductors": ("SOXL", "SOXS"), "Russell 2000": ("TNA", "TZA"), "Technology": ("TECL", "TECS")}
 ETF_BENCHMARKS = ("SPY", "QQQ")
+# ProShares publishes each fund's daily NAV, shares outstanding and assets since launch; Direxion publishes only
+# today's shares outstanding (and its pages sit behind a bot check), so its funds have no history to rank.
+PROSHARES_URL = "https://accounts.profunds.com/etfdata/ByFund/{}-historical_nav.csv"
+PROSHARES_PAIRS = {"Nasdaq-100": ("TQQQ", "SQQQ"), "S&P 500": ("UPRO", "SPXU"), "Dow": ("UDOW", "SDOW"),
+                   "Russell 2000": ("URTY", "SRTY")}
+SHARE_WINDOW = 756   # sessions: bull funds grew from about 43% to over 90% of these assets since 2010, so rank within 3 years
 ETF_START = "2010-01-01"
 ETF_WINDOW = 20      # sessions: one month of trading, so a single hectic day does not swing the reading
 ETF_MIN_PAIRS = 4    # a basket missing more than two index pairs is no longer comparable with its history
@@ -358,6 +365,87 @@ def parse_etfs(dollar_volume, assets=None):
                                      points=pairs(sentiment.thinned([(d, v) for d, _, v in rows], recent_from), 2))})
 
 
+def parse_proshares(texts):
+    """Daily NAV and assets per fund from ProShares' split-adjusted history files, keyed by symbol."""
+    frames = {}
+    for symbol, text in texts.items():
+        rows = []
+        for row in csv.DictReader(io.StringIO(text)):
+            try:
+                rows.append((datetime.strptime(row["Date"].strip(), "%m/%d/%Y").date(), sentiment.number(row["NAV"], 0.0),
+                             sentiment.number(row["Assets Under Management"], 0)))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if len(rows) < 300:
+            raise ValueError(f"Unrecognized ProShares history for {symbol}")
+        frames[symbol] = pd.DataFrame(rows, columns=["day", "nav", "aum"]).drop_duplicates("day").set_index("day").sort_index()
+    return frames
+
+
+def signed_money(value):
+    return f"{'+' if value >= 0 else '−'}${abs(value) / 1e9:.2f}B"
+
+
+def etf_flows(frames):
+    """Net money into 3× bull minus bear funds over 20 sessions, and bull funds' share of the assets.
+
+    A fund's flow is its change in assets beyond what its own NAV return explains, so a leveraged fund's daily gains
+    and losses never count as money arriving or leaving. The files are split-adjusted, so reverse splits do not either.
+    """
+    bulls, bears = [p[0] for p in PROSHARES_PAIRS.values()], [p[1] for p in PROSHARES_PAIRS.values()]
+    nav = pd.DataFrame({s: frames[s]["nav"] for s in bulls + bears}).dropna()
+    aum = pd.DataFrame({s: frames[s]["aum"] for s in bulls + bears}).reindex(nav.index)
+    flow = (aum - aum.shift(1) * nav / nav.shift(1)).iloc[1:]
+    bull_in, bear_in = flow[bulls].sum(axis=1).rolling(ETF_WINDOW).sum(), flow[bears].sum(axis=1).rolling(ETF_WINDOW).sum()
+    assets = aum.iloc[1:].sum(axis=1)
+    frame = pd.DataFrame({"flows": (bull_in - bear_in) / assets.rolling(ETF_WINDOW).mean() * 100, "bull_in": bull_in, "bear_in": bear_in,
+                          "share": aum[bulls].iloc[1:].sum(axis=1) / assets * 100, "bull": aum[bulls].iloc[1:].sum(axis=1), "assets": assets}).dropna()
+    if len(frame) < SHARE_WINDOW:
+        raise ValueError("Too little ProShares history")
+    return frame
+
+
+def parse_etfs_combined(frames=None, volume=None):
+    """The daily card: ProShares flows and asset share lead; Yahoo trading volume, when downloaded, stays as context."""
+    if frames is None:
+        if volume is None:
+            raise ValueError("No leveraged ETF data")
+        return volume  # flows unavailable this refresh: the volume card as before, without the flow inputs
+    frame = etf_flows(frames)
+    last = frame.index[-1]
+    row = frame.iloc[-1]
+    flow_rank = percentile(list(frame["flows"]), row["flows"])
+    share_rank = percentile(list(frame["share"].iloc[-SHARE_WINDOW:]), row["share"])
+    since = frame.index[0].year
+    inflow = row["flows"] >= 0
+    level = "high" if "high" in (tone(flow_rank), tone(share_rank)) else "low" if "low" in (tone(flow_rank), tone(share_rank)) else "normal"
+    lines = [f"Bull funds hold {row['share']:.1f}% of 3× fund assets ({dollars(row['bull'] / 1e6)} of {dollars(row['assets'] / 1e6)}) · "
+             f"{ordinal(share_rank)} percentile of the last 3 years",
+             f"Net flows, {ETF_WINDOW} sessions: bull funds {signed_money(row['bull_in'])}, bear funds {signed_money(row['bear_in'])} = "
+             f"{row['flows']:+.1f}% of assets · {ranked(flow_rank, since)}".replace("-", "−")]
+    if volume:
+        lines += [line + " (Yahoo volume, context)" for line in volume.get("lines", [])[:2]]
+    recent_from = last - timedelta(days=sentiment.HISTORY_DAYS)
+    series = lambda column, digits: pairs(sentiment.thinned([(d, float(v)) for d, v in frame[column].items()], recent_from), digits)
+    return dict(
+        as_of=last.isoformat(), value=round(float(row["share"]), 1), reading=f"{row['share']:.0f}% bull", tone=level,
+        signal=("Money entering bull funds" if inflow else "Money leaving bull funds") + f" · {ordinal(share_rank)} pct of 3-yr assets",
+        lines=lines, frequency="daily", funds=[f"{name}: {b} / {s}" for name, (b, s) in PROSHARES_PAIRS.items()],
+        detail=("ProShares' daily fund files for its 3× index ETFs, bull funds against their bear twins: "
+                + "; ".join(f"{name} {b}/{s}" for name, (b, s) in PROSHARES_PAIRS.items()) + ". Net flow is each fund's change in "
+                "assets beyond its own NAV return, so gains and losses are not counted as money moving. These funds are held "
+                "mostly by individual investors, so flows are a same-day read of leveraged retail demand: new money tends to "
+                "arrive on dips while a rally is intact. Bull funds' share of the assets is the standing leveraged position; it "
+                "is ranked within three years because the funds grew steadily, and it falls when leveraged holders give up. "
+                "Direxion's funds (SPXL, SOXL, TNA, TECL and their bear twins) publish no share history and are not included. "
+                "This is not a measure of borrowing: nobody reports retail leverage daily."),
+        series={**(volume or {}).get("series", {}),
+                "etf_flows": dict(name=f"Net flows into 3× bull minus bear funds, {ETF_WINDOW} sessions, % of assets", unit="%",
+                                  source="ProShares daily fund data", frequency="daily", points=series("flows", 2)),
+                "etf_share": dict(name="Bull funds' share of 3× fund assets", unit="%", source="ProShares daily fund data",
+                                  frequency="daily", points=series("share", 1))})
+
+
 def etf_assets(symbols):
     def one(symbol):
         try:
@@ -368,12 +456,26 @@ def etf_assets(symbols):
         return dict(pool.map(one, symbols))
 
 
-def fetch_etfs(now):
+def fetch_volume(now):
     local = now.astimezone(context.MARKET_TZ)
     symbols = [s for pair in ETF_PAIRS.values() for s in pair]
     frame = fear_greed.completed(yf.download(symbols + list(ETF_BENCHMARKS), start=ETF_START, interval="1d", auto_adjust=False,
                                              group_by="column", progress=False, threads=True, timeout=20), local.date(), local.hour)
-    return {**parse_etfs(frame["Close"] * frame["Volume"], etf_assets(symbols)), "url": "https://finance.yahoo.com/quote/TQQQ/history/"}
+    return parse_etfs(frame["Close"] * frame["Volume"], etf_assets(symbols))
+
+
+def fetch_etfs(client, now):
+    """ProShares flows and Yahoo volume, each optional: either source alone still gives the card a reading."""
+    try:
+        frames = parse_proshares({s: sentiment.request_text(client, PROSHARES_URL.format(s))
+                                  for pair in PROSHARES_PAIRS.values() for s in pair})
+    except (ValueError, OSError, httpx.HTTPError):
+        frames = None
+    try:
+        volume = fetch_volume(now)
+    except Exception:
+        volume = None
+    return {**parse_etfs_combined(frames, volume), "url": "https://www.proshares.com/our-etfs/leveraged-and-inverse/tqqq"}
 
 
 # ---------- CFTC: leveraged funds in S&P 500 futures, weekly (already fetched for the sentiment panel) ----------
@@ -415,7 +517,7 @@ def collect(now=None):
     today = now.astimezone(context.MARKET_TZ).date()
     with httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=30, follow_redirects=True) as client:
         jobs = {"finra": lambda: fetch_finra(client), "z1": lambda: fetch_z1(client), "ofr": lambda: fetch_ofr(client),
-                "fsr": lambda: fetch_fsr(client, today), "etf": lambda: fetch_etfs(now)}
+                "fsr": lambda: fetch_fsr(client, today), "etf": lambda: fetch_etfs(client, now)}
 
         def run(job):
             key, fetch = job

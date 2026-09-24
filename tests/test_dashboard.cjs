@@ -615,31 +615,42 @@ test('sentiment label weighs its five inputs and flags a historic extreme', () =
   assert.equal(partial.element('tab-label-sentiment').textContent, 'Leaning bullish');  // (12.5 + 8.8 − 8.0) ÷ 60 = +0.22
 });
 
-test('leverage label reads high leverage as bearish and flags a historic high', () => {
-  const months = Array.from({length: 120}, (_, i) => { const d = new Date(Date.UTC(2016, 9 + i, 0)); return d.toISOString().slice(0, 10); });
-  const rising = months.map((d, i) => [d, i]);  // the latest point is the highest on record
+test('leverage label: more leverage is bullish, led by the daily 3× fund data', () => {
+  const months = Array.from({length: 120}, (_, i) => new Date(Date.UTC(2016, 9 + i, 0)).toISOString().slice(0, 10));
   const quarters = months.filter((_, i) => i % 3 === 2);
+  const days = [];
+  for (let t = Date.parse('2023-01-02T00:00:00Z'); t <= Date.parse('2026-09-17T00:00:00Z'); t += 864e5) if (new Date(t).getUTCDay() % 6) days.push(new Date(t).toISOString().slice(0, 10));
   const series = {
-    finra: {unit: '%', points: rising}, z1: {unit: '%', points: quarters.map((d, i) => [d, 40 - i])},  // record low
-    ofr: {unit: '×', points: quarters.map((d, i) => [d, 2 + i / 100])}, ofr_gne: {unit: '×', points: quarters.map((d, i) => [d, 6 + i / 10])},
+    etf_flows: {unit: '%', points: days.map((d, i) => [d, -20 + i / 20])},  // the latest inflow is the largest on record
+    etf_share: {unit: '%', points: days.map((d) => [d, 90])},                 // exactly typical for 3 years
+    finra: {unit: '%', points: months.map((d, i) => [d, i])},
+    ofr_gne: {unit: '×', points: quarters.map((d, i) => [d, 6 + i / 10])},
+    z1: {unit: '%', points: quarters.map((d, i) => [d, 40 - i])},
     cot_lev: {unit: '%', points: months.map((d, i) => [d, i % 2 ? 5 : -5])},
-    etf_bull: {unit: '%', points: rising.map(([d, v]) => [d, 50 + (v % 20)])}, etf_activity: {unit: '%', points: rising},
   };
   const card = (key, frequency, extra = {}) => ({key, status: 'ok', as_of: months.at(-1), frequency, ...extra});
-  const leverage = {cards: [card('finra', 'monthly'), card('z1', 'quarterly'), card('ofr', 'quarterly'), card('cot', 'weekly'),
-                            card('etf', 'daily', {status: 'unavailable'}), card('fsr', 'semiannual')], series};
-  const app = renderEarnings(null, {}, {macro: {cards: []}, leverage});
-  // (−0.99 × 25 + 0.98 × 15 − 0.98 × 15 − 0.98 × 10 − 0.50 × 10) ÷ 75 = −0.53; ETFs unavailable.
-  assert.equal(app.element('tab-label-leverage').textContent, 'Bearish · historic high');
+  const cards = [card('finra', 'monthly'), card('z1', 'quarterly'), card('ofr', 'quarterly'), card('cot', 'weekly'), card('etf', 'daily'), card('fsr', 'semiannual')];
+  const app = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards, series}});
+  // 35 × 1.00 + 25 × 0 + 30 × 0.99 + 4 × 0.98 + 3 × −0.98 + 3 × 0.50 = +0.67
+  assert.equal(app.element('tab-label-leverage').textContent, 'Bullish · historic high');
   const box = app.element('verdict-leverage').innerHTML;
-  assert.match(box, /75% of the weight has fresh data/);
-  assert.match(box, /<strong>Historic high:<\/strong> Margin debt, 12-month change \(FINRA\) is at the 100th percentile/);
-  assert.match(box, /<th scope="row">Margin debt, 12-month change \(FINRA\)<\/th><td>\+119.0% · 100th pct<\/td><td class="down">−0.99<\/td><td>25%<\/td><td>33%<\/td>/);
-  assert.match(box, /<th scope="row">Margin loans ÷ stock market value \(Fed Z.1\)<\/th><td>1.0% · 1st pct<\/td><td class="up">\+0.98<\/td>/);
-  assert.match(box, /<th scope="row">3× ETF volume vs SPY \+ QQQ<\/th><td>Unavailable<\/td><td class="">—<\/td><td>15%<\/td><td>excluded<\/td>/);
-  assert.match(box, /either extreme = −1/);
-  const stale = renderEarnings(null, {}, {macro: {cards: []}, leverage: {...leverage, series: {...series,
-    finra: {unit: '%', points: rising.map(([d, v], i) => [months[i - 6] || d, v]).slice(0, -6)}}}});
+  assert.match(box, /verdict-score">\+0.67 <small>on −1 … \+1 · less leverage \(bearish\) … more leverage \(bullish\)/);
+  assert.match(box, /<strong>Historic high:<\/strong> Net money into 3× bull minus bear funds, 20 sessions \(ProShares\) is at the 100th percentile/);
+  assert.match(box, /<th scope="row">Net money into 3× bull minus bear funds, 20 sessions \(ProShares\)<\/th><td>\+28.4% · 100th pct<\/td><td class="up">\+1.00<\/td><td>35%<\/td><td>35%<\/td>/);
+  assert.match(box, /<th scope="row">Bull funds&#39; share of 3× fund assets \(ProShares\)<\/th><td>90.0% · 50th pct \(3 yr\)<\/td><td class="">0.00<\/td><td>25%<\/td>/);
+  assert.match(box, /<th scope="row">Margin debt, 12-month change \(FINRA\)<\/th><td>\+119.0% · 100th pct<\/td><td class="up">\+0.99<\/td><td>30%<\/td>/);
+  assert.match(box, /<th scope="row">Margin loans ÷ stock market value \(Fed Z.1\)<\/th><td>1.0% · 1st pct<\/td><td class="down">−0.98<\/td><td>3%<\/td>/);
+  assert.match(box, /<th scope="row">Leveraged funds&#39; net S&amp;P futures \(CFTC\)<\/th><td>\+5.0% · 75th pct \(3 yr\)<\/td><td class="up">\+0.50<\/td><td>3%<\/td>/);
+  // Without the daily fund data only 40% of the weight is left: no label from slow sources alone.
+  const noDaily = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards: cards.map((c) => c.key === 'etf' ? {...c, status: 'unavailable'} : c), series}});
+  assert.equal(noDaily.element('tab-label-leverage').textContent, 'Insufficient data');
+  assert.match(noDaily.element('verdict-leverage').innerHTML, /<th scope="row">Net money into 3× bull minus bear funds, 20 sessions \(ProShares\)<\/th><td>Unavailable<\/td>/);
+  // A report saved before 3.2.0 has the ETF card but not the fund-flow series: it says to refresh.
+  const { etf_flows, etf_share, ...older } = series;
+  const saved = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards, series: older}});
+  assert.match(saved.element('verdict-leverage').innerHTML, /<td>No reading · refresh data<\/td>/);
+  const stale = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards, series: {...series,
+    finra: {unit: '%', points: months.map((d, i) => [months[i - 6] || d, i]).slice(0, -6)}}}});
   assert.match(stale.element('verdict-leverage').innerHTML, /<th scope="row">Margin debt, 12-month change \(FINRA\)<\/th><td>Stale<\/td>/);  // over 75 days old
 });
 
