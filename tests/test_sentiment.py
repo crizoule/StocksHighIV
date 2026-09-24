@@ -350,6 +350,25 @@ class MacroTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Too little COT history"):  # weeks after today are never read
             s.parse_cot(data, start + timedelta(weeks=weeks - 2))
 
+    def test_put_call_gap_fills_every_refresh_and_reports_what_is_left(self):
+        days = [date(2019, 10, 1) + timedelta(days=i) for i in range(400)]
+        history = {"put_call_archive": {"daily": [["2019-10-04", 0.6]]}, "spx": {"points": [[d.isoformat(), 3000] for d in days]}}
+        after = [d for d in days if d > date(2019, 10, 4)]
+        calls = []
+        def stored(client, sessions, deadline):
+            calls.append(sessions)
+            return {d.isoformat(): {} for d in sessions[200:]}  # the newest filled first; the oldest still to come
+        with patch.object(s, "put_call_history", stored):
+            gap = s.fill_put_call_gap(None, history)
+        self.assertEqual(calls, [after])  # only sessions after the archive, all asked for at once
+        self.assertEqual(gap, {"missing": 200, "from": after[0].isoformat(), "to": after[199].isoformat()})
+        with patch.object(s, "put_call_history", lambda client, sessions, deadline: {d.isoformat(): {} for d in sessions[2:]}):
+            self.assertIsNone(s.fill_put_call_gap(None, history))  # a couple of unpublished half-days is not a gap
+        self.assertIsNone(s.fill_put_call_gap(None, {"spx": history["spx"]}))  # no archive yet: nothing to join
+        source = s.chart_history({}, {"put_call_gap": gap})["series"]["put_call"]["source"]
+        self.assertTrue(source.endswith("still filling 200 sessions between 2019-10-05 and 2020-04-21; each refresh adds more"))
+        self.assertNotIn("still filling", s.chart_history({}, {})["series"]["put_call"]["source"])
+
     def test_cache_failure_never_replaces_fetch_time_with_now(self):
         with TemporaryDirectory() as temp, patch.object(s.config, "DATA_DIR", Path(temp)):
             saved = s.cached_read("vix", lambda: {"as_of": "2026-09-17", "value": 15}, NOW)

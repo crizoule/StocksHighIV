@@ -159,7 +159,21 @@ class EnteredWeekTests(unittest.TestCase):
             aaii.apply_entered(payload, data)
             self.assertEqual(payload["macro_sentiment"]["history"]["series"]["aaii"]["points"],
                              [["2026-09-09", 10.0], ["2026-09-16", -24.5]])
-            self.assertNotIn("lines", payload["macro_sentiment"]["history"]["series"]["aaii"])  # saved before 2.9.0: spread only
+            aaii_chart = payload["macro_sentiment"]["history"]["series"]["aaii"]
+            # Saved before 2.9.0 with the spread alone: the three shares are rebuilt from the bundled and entered weeks.
+            self.assertEqual(aaii_chart["lines"]["bullish"], [["2026-09-09", 40.0], ["2026-09-16", 28.8]])
+            self.assertEqual(aaii_chart["lines"]["bearish"], [["2026-09-09", 30.0], ["2026-09-16", 53.3]])
+            self.assertEqual((aaii_chart["name"], aaii_chart["unit"]), ("AAII bullish / neutral / bearish", "%"))
+
+    def test_saved_reports_gain_the_three_lines_even_without_entered_weeks(self):
+        with TemporaryDirectory() as data, patch.object(aaii, "bundled", return_value={date(2026, 9, 10): [40.0, 30.0, 30.0]}):
+            card = {"key": "aaii", "status": "ok", "as_of": "2026-09-17", "date_label": "reported", "value": -15.4,
+                    "bullish": 35.0, "neutral": 14.6, "bearish": 50.4}
+            payload = {"macro_sentiment": {"cards": [card], "history": {"series": {"aaii": {"points": [["2026-09-09", 10.0]]}}}}}
+            aaii.apply_entered(payload, data)
+            self.assertEqual(payload["macro_sentiment"]["history"]["series"]["aaii"]["lines"]["neutral"],
+                             [["2026-09-09", 30.0], ["2026-09-16", 14.6]])  # the card's reported week, by survey Wednesday
+            self.assertIs(payload["macro_sentiment"]["cards"][0], card)  # nothing entered: the card is left alone
 
     def test_the_three_shares_follow_the_same_weeks_as_the_spread(self):
         with TemporaryDirectory() as data, patch.object(aaii, "bundled", return_value={date(2026, 9, 10): [40.0, 30.0, 30.0]}):

@@ -389,6 +389,29 @@ def put_call_window(sessions, archive, rank_window):
     return sessions[-rank_window:]
 
 
+def fill_put_call_gap(client, history, budget=PUT_CALL_BACKFILL_SECONDS):
+    """Fetch the Cboe sessions missing since its archive ended, newest first, on every refresh; returns what is still missing.
+
+    The replica backfills only when it is rebuilt, at most every six hours, which left the chart's 2019–2022 years
+    empty for days. Sessions come from the S&P 500 closes already downloaded. None when nothing significant is missing.
+    """
+    archive = (history.get("put_call_archive") or {}).get("daily") or []
+    points = (history.get("spx") or {}).get("points") or []
+    if not archive or not points:
+        return None
+    end = iso_date(archive[-1][0])
+    wanted = [d for d in (iso_date(p[0]) for p in points) if d > end]
+    if not wanted:
+        return None
+    progress.emit(activity="Filling Cboe put/call history")
+    stored = put_call_history(client, wanted, time.monotonic() + budget)
+    missing = [d for d in wanted if d.isoformat() not in stored]
+    # A few sessions never parse (Cboe posts nothing for some half-days); only a real gap is reported.
+    if len(missing) <= len(wanted) * (1 - PUT_CALL_FILLED):
+        return None
+    return {"missing": len(missing), "from": missing[0].isoformat(), "to": missing[-1].isoformat()}
+
+
 def fear_greed_inputs(client, now, *, period=REPLICA_HISTORY, put_call_sessions=fear_greed.PUT_CALL_SESSIONS,
                       backfill_seconds=PUT_CALL_BACKFILL_SECONDS):
     local = now.astimezone(context.MARKET_TZ)
@@ -774,6 +797,8 @@ def collect(rows, *, now=None):
             for i, (kind, key, value) in enumerate(pool.map(run, jobs.items()), 1):
                 result[kind][key] = value
                 progress.emit(activity=f"Sentiment sources checked: {i}/{len(jobs)}")
+        # After the pool, so it never races the replica's own backfill of the same file.
+        result["history"]["put_call_gap"] = fill_put_call_gap(client, result["history"])
     result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
     result["history"]["aaii"] = aaii.spread_series(config.DATA_DIR, result["macro"]["aaii"])
     result["history"]["aaii_shares"] = aaii.share_series(config.DATA_DIR, result["macro"]["aaii"])
@@ -827,8 +852,10 @@ def chart_history(macro, history):
         "aaii": dict(name="AAII bullish / neutral / bearish", unit="%", source="AAII weekly survey", frequency="weekly",
                      points=history.get("aaii") or [], lines=history.get("aaii_shares") or {}),
         "vix": dict(name="VIX", unit="", source="Cboe", frequency="daily", points=(macro.get("vix") or {}).get("history") or []),
-        "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics",
-                         frequency="daily", points=history.get("put_call") or []),
+        "put_call": dict(name="Equity put/call, 5-day average", unit="", frequency="daily", points=history.get("put_call") or [],
+                         source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics" + (
+                             f" · still filling {gap['missing']} sessions between {gap['from']} and {gap['to']}; each refresh adds more"
+                             if (gap := history.get("put_call_gap")) else "")),
         "fear_greed": {**fear, "unit": "", "frequency": "daily"},
         "rsi": dict(name=f"RSI {RSI_PERIOD}", unit="", source="Computed from S&P 500 daily closes", frequency="daily",
                     points=(history.get("spx") or {}).get("rsi") or []),

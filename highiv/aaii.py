@@ -147,26 +147,33 @@ def save_week(data_dir, week_ending, bullish, neutral, bearish, today):
 
 
 def apply_entered(payload, data_dir):
-    """Show hand-entered weeks on a saved report (card and chart) without waiting for the next refresh."""
+    """Show hand-entered weeks on a saved report (card and chart) without waiting for the next refresh.
+
+    A report saved before 2.9.0 holds only the bull–bear spread; its three shares are rebuilt here from the bundled
+    history, the entered weeks and the report's own AAII card, so an update shows the three lines straight away.
+    """
     macro = payload.get("macro_sentiment") or {}
     reading = entered(data_dir)
-    if not reading:
-        return payload
+    weeks = entered_weeks(data_dir)
     chart = ((macro.get("history") or {}).get("series") or {}).get("aaii")
     if chart and isinstance(chart.get("points"), list):
-        weeks = entered_weeks(data_dir)
         points = {day: value for day, value in chart["points"]}
         points.update({when.isoformat(): round(v[0] - v[2], 2) for when, v in weeks.items()})
         chart["points"] = [[day, points[day]] for day in sorted(points)]
-        for i, name in enumerate(SHARES):  # reports saved before 2.9.0 carry the spread alone
-            if isinstance((chart.get("lines") or {}).get(name), list):
-                shares = {day: value for day, value in chart["lines"][name]}
+        lines = chart.get("lines")
+        if isinstance(lines, dict) and all(isinstance(lines.get(name), list) and lines[name] for name in SHARES):
+            for i, name in enumerate(SHARES):
+                shares = {day: value for day, value in lines[name]}
                 shares.update({when.isoformat(): round(v[i], 2) for when, v in weeks.items()})
-                chart["lines"][name] = [[day, shares[day]] for day in sorted(shares)]
-    for index, card in enumerate(macro.get("cards") or []):
-        if card.get("key") == "aaii" and newest(card, reading) is reading:
-            keep = {k: card[k] for k in ("key", "name", "url", "max_age") if k in card}
-            macro["cards"][index] = {**reading, **keep}
+                lines[name] = [[day, shares[day]] for day in sorted(shares)]
+        else:
+            card = next((c for c in macro.get("cards") or [] if c.get("key") == "aaii"), None)
+            chart.update(name="AAII bullish / neutral / bearish", unit="%", lines=share_series(data_dir, card))
+    if reading:
+        for index, card in enumerate(macro.get("cards") or []):
+            if card.get("key") == "aaii" and newest(card, reading) is reading:
+                keep = {k: card[k] for k in ("key", "name", "url", "max_age") if k in card}
+                macro["cards"][index] = {**reading, **keep}
     return payload
 
 
