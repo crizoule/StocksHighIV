@@ -307,6 +307,21 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(leverage["checked_at"], NOW.isoformat())
         json.dumps(payload, allow_nan=False)
 
+    def test_a_cached_etf_card_from_before_the_fund_flows_is_fetched_again(self):
+        old = {"as_of": "2026-09-23", "value": 70, "series": {"etf_bull": {}, "etf_activity": {}}}
+        new = {"as_of": "2026-09-23", "value": 94, "series": {"etf_flows": {}, "etf_share": {}}}
+        calls = []
+        other = lambda *args: {"as_of": "2026-06-30", "value": 1}
+        with TemporaryDirectory() as temp, patch.object(lv.sentiment.config, "DATA_DIR", Path(temp)), \
+                patch.multiple(lv, fetch_finra=other, fetch_z1=other, fetch_ofr=other, fetch_fsr=other,
+                               fetch_etfs=lambda client, now: calls.append(now) or new):
+            lv.sentiment.write_json(Path(temp) / "sentiment" / "leverage-etf.json",
+                                    {**old, "status": "ok", "fetched_at": (NOW - timedelta(hours=1)).isoformat()})  # well inside 6 hours
+            self.assertEqual(lv.collect(NOW)["etf"]["value"], 94)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(lv.collect(NOW)["etf"]["value"], 94)  # the complete copy is then reused
+            self.assertEqual(len(calls), 1)
+
     def test_collect_caches_each_source_and_refuses_future_observations(self):
         fetched = {"finra": {"as_of": "2026-08-31", "value": 1}, "z1": {"as_of": "2026-06-30", "value": 1},
                    "ofr": {"as_of": "2026-03-31", "value": 1}, "fsr": {"as_of": "2026-12-01", "value": None},

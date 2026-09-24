@@ -50,6 +50,8 @@ ETF_MIN_PAIRS = 4    # a basket missing more than two index pairs is no longer c
 ELEVATED, LOW = 80, 20  # percentiles within each measure's own history
 TTL_HOURS = {"etf": 6}  # the others publish monthly or less often
 DEFAULT_TTL = 12
+# A cached copy saved by an older version can lack what this one needs; it is fetched again rather than reused.
+COMPLETE = {"etf": lambda item: "etf_flows" in (item.get("series") or {})}  # before 3.2.0: trading volume only
 ORDER = ("finra", "z1", "ofr", "cot", "etf", "fsr")
 
 
@@ -527,7 +529,8 @@ def collect(now=None):
                 if sentiment.iso_date(item["as_of"]) > today:
                     raise ValueError("Future observation")
                 return item
-            return key, sentiment.cached_read(f"leverage-{key}", dated, now, TTL_HOURS.get(key, DEFAULT_TTL), sessions=key == "etf")
+            return key, sentiment.cached_read(f"leverage-{key}", dated, now, TTL_HOURS.get(key, DEFAULT_TTL), COMPLETE.get(key),
+                                              sessions=key == "etf")
 
         progress.emit(activity="Checking market leverage sources")
         with ThreadPoolExecutor(max_workers=4) as pool:
