@@ -119,7 +119,9 @@ class SettledTests(unittest.TestCase):
     def test_cboe_follows_spys_session_and_mx_the_weekday_calendar(self):
         ny = scan.market.MARKET_TZ
         at = lambda *args: datetime(*args, tzinfo=ny)
-        with patch.object(iv, "cboe_iv30", return_value={**QUOTE, "quote_date": "2026-09-18"}) as probe:
+        lines = []
+        with patch.object(scan, "log", side_effect=lines.append), \
+                patch.object(iv, "cboe_iv30", return_value={**QUOTE, "quote_date": "2026-09-18"}) as probe:
             self.assertEqual(scan.settled_since(None, None, at(2026, 9, 19, 12)),  # Saturday
                              {"cboe": "2026-09-18T20:30:00+00:00", "mx": "2026-09-18T20:30:00+00:00"})
             # A Monday holiday: SPY still shows Friday, so Friday's quotes stay final; the calendar expects a session.
@@ -131,6 +133,13 @@ class SettledTests(unittest.TestCase):
             probe.return_value = {**QUOTE, "quote_date": "2026-09-21"}  # the feed has caught up to today
             self.assertEqual(scan.settled_since(None, None, at(2026, 9, 21, 11))["cboe"], "2026-09-21T20:30:00+00:00")
             self.assertEqual(probe.call_count, 4)
+            # A stalled feed is announced, so a refresh that changes nothing does not look like a silent failure.
+            self.assertTrue(any("still serving the 2026-09-18 session, 3 days behind the 2026-09-21 close" in line
+                                for line in lines), lines)
+            lines.clear()
+            probe.return_value = {**QUOTE, "quote_date": "2026-09-21"}
+            scan.settled_since(None, None, at(2026, 9, 21, 18))
+            self.assertEqual(lines, [])  # current feed: nothing to say
             probe.side_effect = net.FetchError("offline")
             self.assertIsNone(scan.settled_since(None, None, at(2026, 9, 19, 12))["cboe"])
 

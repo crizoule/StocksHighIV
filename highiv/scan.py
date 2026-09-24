@@ -48,6 +48,11 @@ def settled_since(client, limiter: net.RateLimiter, now: datetime) -> dict[str, 
         probe = None
     session = (probe or {}).get("quote_date")
     day, next_open = market.last_session(now)
+    if session and session < day.isoformat():
+        # Cboe's delayed feed sometimes stalls for a whole session or more; say so rather than look idle.
+        behind = (day - date.fromisoformat(session)).days
+        log(f"Cboe is still serving the {session} session, {behind} day{'s' if behind > 1 else ''} behind the {day} close: "
+            "quotes cannot have changed since, so stored ones are reused")
     stamp = lambda day: market.settled_at(day).astimezone(timezone.utc).isoformat(timespec="seconds")
     return {"cboe": stamp(date.fromisoformat(session)) if session else None,
             "mx": stamp(day) if now < next_open and not market.is_open(now) else None}
