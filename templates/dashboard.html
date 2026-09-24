@@ -249,10 +249,15 @@
             <label class="switch" for="cmdty-log"><input type="checkbox" id="cmdty-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
           </div>
         </figcaption>
-        <div class="macro-legend" id="cmdty-legend"></div>
-        <div class="macro-plot" id="cmdty-plot"></div>
-        <div class="macro-windows-wrap"><table class="macro-windows" id="cmdty-windows"></table></div>
-        <p class="macro-note" id="cmdty-windows-note"></p>
+        <div class="cmdty-layout">
+          <nav class="cmdty-nav" id="cmdty-nav" aria-label="Choose a market to chart"></nav>
+          <div class="cmdty-main">
+            <div class="macro-legend" id="cmdty-legend"></div>
+            <div class="macro-plot" id="cmdty-plot"></div>
+            <div class="macro-windows-wrap"><table class="macro-windows" id="cmdty-windows"></table></div>
+            <p class="macro-note" id="cmdty-windows-note"></p>
+          </div>
+        </div>
       </figure>
       <div id="cmdty-groups"></div>
       <details class="sentiment-method"><summary>How to read these charts</summary><p>Each chart puts the futures price (Yahoo's continuous front-month contract, weekly closes; the spot index for VIX and the dollar index) above the CFTC's weekly Commitments of Traders positions for the same market, as net contracts (long minus short) over all open interest. The blue line is the group that carries the directional view; the orange line is the group usually on the other side.</p><p><strong>Physical commodities</strong> (Disaggregated report): managed money (hedge funds and commodity trading advisers) leads. Producers and merchants hedge what they grow, mine, process or use, so they are usually net short and sell more as prices rise; managed-money extremes are often read contrarian.</p><p><strong>Financial futures</strong> (Traders in Financial Futures report) have no producers, and which group to read depends on the asset. In stock indices, Treasuries and crypto, leveraged funds' large net shorts are mostly basis trades (short futures against long stocks, bonds or ETFs, financed with borrowed money), not bets on a fall, so asset managers' real-money position leads. In currencies, short-term rates and VIX, leveraged funds are the speculative bet and lead. Long Treasury or fed funds futures is a bet on lower yields or rates; long a currency is a bet it rises against the US dollar; long VIX is a bet volatility rises, which usually comes with falling stocks.</p><p>The COT index ranks the leading group's net position within the last three years (0 = least long, 100 = most long); 80 or above and 20 or below are marked. Categories and markets are ordered by open interest. Positions are as of Tuesday and published the following Friday at 3:30 PM ET. Contracts without a free continuous price are listed under each section.</p></details>

@@ -20,7 +20,7 @@
   const $ = (id) => document.getElementById(id);
 
   const PAGES = ["scan", "sentiment", "leverage", "commodities", "searches"];
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, lseries: "finra", lrange: "10Y", llog: false, page: "scan", cseries: "cot", crange: "5Y", clog: false, commodity: null };
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, lseries: "finra", lrange: "10Y", llog: false, page: "scan", cseries: "cot", crange: "5Y", clog: false, commodity: null, cgroups: null };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
@@ -35,12 +35,13 @@
     if (saved && ["3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.crange)) state.crange = saved.crange;
     if (saved && typeof saved.commodity === "string") state.commodity = saved.commodity;
     if (saved) state.clog = saved.clog === true;
+    if (saved && Array.isArray(saved.cgroups)) state.cgroups = saved.cgroups.filter((g) => typeof g === "string");
     if (saved) { state.mlog = saved.mlog === true; state.llog = saved.llog === true; }
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
       localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog,
-        lseries: state.lseries, lrange: state.lrange, llog: state.llog, page: state.page, crange: state.crange, clog: state.clog, commodity: state.commodity }));
+        lseries: state.lseries, lrange: state.lrange, llog: state.llog, page: state.page, crange: state.crange, clog: state.clog, commodity: state.commodity, cgroups: state.cgroups }));
     } catch (err) { /* ignore */ }
   };
 
@@ -731,6 +732,44 @@
     return long ? "Speculators crowded long" : "Speculators crowded short";
   };
   const signedPct = (v) => isNum(v) ? signedFmt(1, "%")(v) : "—";
+  // Positioning at the edge of its own three years: the top or bottom 5% is extreme, the next 15% near-extreme
+  // (the same 80/20 line the cards call crowded). Asset managers at the low end are light rather than short.
+  const extremeOf = (m) => !isNum(m.index) ? null : m.index >= 95 || m.index <= 5 ? "extreme" : m.index >= 80 || m.index <= 20 ? "near" : null;
+  const extremeLabel = (m) => {
+    const level = extremeOf(m);
+    if (!level) return "";
+    const side = m.index >= 50 ? "long" : m.lead_name === "Asset managers" ? "light" : "short";
+    return `${level === "extreme" ? "Extreme" : "Near-extreme"} ${side}`;
+  };
+  const cmdtyGroupKey = (section, group) => `${section.key}:${group.key}`;
+  const cmdtyGroupOf = (code) => {
+    for (const section of cmdtySections()) for (const group of section.groups || []) if ((group.markets || []).some((m) => m.code === code)) return cmdtyGroupKey(section, group);
+    return null;
+  };
+  const openGroup = (code) => {
+    const key = cmdtyGroupOf(code);
+    state.cgroups = [...new Set([...(state.cgroups || []), ...(key ? [key] : [])])];
+  };
+  // Beside the big chart: every section and category, collapsible, each market with its extreme-positioning label.
+  const renderCmdtyNav = () => {
+    const chosen = cmdtyMarket(), sections = cmdtySections();
+    if (state.cgroups === null && chosen) openGroup(chosen.code);  // first visit: the charted market's group is open
+    const open = new Set(state.cgroups || []);
+    $("cmdty-nav").innerHTML = sections.map((section) => `<p class="cmdty-nav-section">${esc(section.name)}</p>` +
+      (section.groups || []).map((group) => {
+        const key = cmdtyGroupKey(section, group), markets = group.markets || [];
+        const flagged = markets.filter((m) => extremeOf(m)), extreme = flagged.filter((m) => extremeOf(m) === "extreme").length;
+        const count = flagged.length ? `<span class="cmdty-nav-flags" title="${extreme} extreme, ${flagged.length - extreme} near-extreme">${extreme ? `${extreme} extreme` : ""}${extreme && flagged.length > extreme ? " · " : ""}${flagged.length > extreme ? `${flagged.length - extreme} near` : ""}</span>` : "";
+        return `<details class="cmdty-nav-group" data-group="${esc(key)}"${open.has(key) ? " open" : ""}><summary><span>${esc(group.name)}</span><span class="cmdty-nav-count">${markets.length}</span>${count}</summary><ul>` +
+          markets.map((m) => {
+            const level = extremeOf(m), on = chosen && m.code === chosen.code;
+            return `<li><button type="button" data-commodity="${esc(m.code)}" aria-pressed="${Boolean(on)}"${on ? ' class="selected"' : ""}>` +
+              `<span class="cmdty-nav-name">${esc(m.name)}</span>` +
+              (level ? `<span class="cmdty-flag ${level}">${esc(extremeLabel(m))}</span>` : "") +
+              `<span class="cmdty-nav-index" title="COT index: ${esc(m.lead_name || "")} within 3 years">${isNum(m.index) ? nf0.format(m.index) : "—"}</span></button></li>`;
+          }).join("") + `</ul></details>`;
+      }).join("")).join("");
+  };
   // A small two-pane chart per card: price above, the leading group (blue) and the second group (orange) below.
   const cmdtyMini = (m) => {
     const price = datedPoints(m.price_history), lead = datedPoints(m.lead_history), second = datedPoints(m.second_history);
@@ -787,7 +826,7 @@
     $("cmdty-note").innerHTML = markets.length
       ? `<span class="data-date">CFTC positions as of ${esc(longDate.format(day(panel.as_of)))}</span>, released ${esc(isoDate(panel.released) ? longDate.format(day(panel.released)) : "—")}; ` +
         `next report ${esc(isoDate(panel.next) ? longDate.format(day(panel.next)) : "—")}, ${esc(panel.next_time || "")}. Prices through ${esc(isoDate(panel.prices_as_of) ? mediumDate.format(day(panel.prices_as_of)) : "—")}. ` +
-        `${markets.length} markets charted in ${categories} categories, each ordered by open interest; ${nf0.format(others)} other contracts listed. Select a card to chart it above.` +
+        `${markets.length} markets charted in ${categories} categories, each ordered by open interest; ${nf0.format(others)} other contracts listed. Choose a market beside the chart, or a card below, to chart it.` +
         (sections.some((s) => s.status === "cached") || panel.price_status === "cached" || panel.cot_status === "cached" ? " Last good data retained; the latest refresh failed." : "")
       : "Futures prices and CFTC positions appear after the next data refresh.";
     const names = panel.categories || {};
@@ -798,6 +837,7 @@
         `<div class="macro-grid cmdty-grid">${(g.markets || []).map((m) => cmdtyCard(m, chosen && m.code === chosen.code)).join("")}</div></section>`).join("") +
       cmdtyOthers(section, names) + `</section>`).join("");
     $("cmdty-chart-title").textContent = chosen ? `${chosen.name} and positioning` : "Price and positioning";
+    renderCmdtyNav();
     renderCmdtyChart();
   };
 
@@ -1497,11 +1537,24 @@
     const card = ev.target.closest?.("[data-commodity]");
     if (!card || (ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " ")) return;
     if (ev.type === "keydown") ev.preventDefault();
-    state.commodity = card.dataset.commodity; persist(); renderCommodities();
+    state.commodity = card.dataset.commodity; openGroup(state.commodity); persist(); renderCommodities();
     $("cmdty-chart").scrollIntoView?.({ behavior: "smooth", block: "start" });
   };
   $("cmdty-groups").addEventListener("click", chooseCommodity);
   $("cmdty-groups").addEventListener("keydown", chooseCommodity);
+  // The navigator keeps its own open groups (re-drawing it would otherwise reset them); a market there charts in place.
+  $("cmdty-nav").addEventListener("click", (ev) => {
+    const summary = ev.target.closest?.("summary"), button = ev.target.closest?.("button[data-commodity]");
+    if (summary) {
+      ev.preventDefault?.();
+      const key = summary.parentElement?.dataset?.group ?? summary.dataset?.group;
+      const open = new Set(state.cgroups || []);
+      if (open.has(key)) open.delete(key); else open.add(key);
+      state.cgroups = [...open]; persist(); renderCmdtyNav();
+    } else if (button) {
+      state.commodity = button.dataset.commodity; openGroup(state.commodity); persist(); renderCommodities();
+    }
+  });
   $("lever-plot").addEventListener("pointermove", leverChart.move);
   $("lever-plot").addEventListener("pointerleave", leverChart.leave);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });

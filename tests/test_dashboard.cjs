@@ -754,6 +754,49 @@ test('futures tab: commodities then financial futures, each market led by the gr
   assert.match(empty.element('cmdty-plot').innerHTML, /history appears after the next data refresh/);
 });
 
+test('market navigator beside the big chart: collapsible groups, extreme labels, charts in place', () => {
+  const lead = (code, name, index, category, leadName) => cmdtyMarket(code, name, 'X=F', 1000, index, {category, lead_name: leadName});
+  const commodities = {as_of: '2026-09-15', released: '2026-09-18', next: '2026-09-25', prices_as_of: '2026-09-24', categories: {},
+    sections: [
+      {key: 'physical', name: 'Physical commodities', groups: [
+        {key: 'energy', name: 'Energy', markets: [lead('067651', 'WTI crude oil', 55, 'energy', 'Managed money'), lead('023651', 'Natural gas', 12, 'energy', 'Managed money')]},
+        {key: 'grains', name: 'Grains', markets: [lead('002602', 'Corn', 100, 'grains', 'Managed money'), lead('001602', 'Wheat', 3, 'grains', 'Managed money')]}], contracts: []},
+      {key: 'financial', name: 'Financial futures', groups: [
+        {key: 'crypto', name: 'Crypto', markets: [lead('133741', 'Bitcoin', 6, 'crypto', 'Asset managers'), lead('146021', 'Ether', 4, 'crypto', 'Asset managers')]}], contracts: []}]};
+  const app = renderEarnings(null, {}, {macro: {cards: []}, commodities, saved: {page: 'commodities'}});
+  const nav = () => app.element('cmdty-nav').innerHTML;
+  assert.match(nav(), /^<p class="cmdty-nav-section">Physical commodities<\/p>/);
+  assert.ok(nav().indexOf('Energy') < nav().indexOf('Grains') && nav().indexOf('Grains') < nav().indexOf('Financial futures'));
+  // Only the charted market's group starts open; the others show how many of their markets are flagged.
+  assert.match(nav(), /data-group="physical:energy" open><summary><span>Energy<\/span><span class="cmdty-nav-count">2<\/span><span class="cmdty-nav-flags"[^>]*>1 near<\/span>/);
+  assert.match(nav(), /data-group="physical:grains"><summary><span>Grains<\/span><span class="cmdty-nav-count">2<\/span><span class="cmdty-nav-flags"[^>]*>2 extreme<\/span>/);
+  assert.match(nav(), /data-group="financial:crypto"><summary>.*1 extreme · 1 near<\/span>/);
+  assert.match(nav(), /data-commodity="067651" aria-pressed="true" class="selected"><span class="cmdty-nav-name">WTI crude oil<\/span><span class="cmdty-nav-index"[^>]*>55<\/span>/);  // typical: no label
+  assert.match(nav(), /Natural gas<\/span><span class="cmdty-flag near">Near-extreme short<\/span><span class="cmdty-nav-index"[^>]*>12</);
+  assert.match(nav(), /Corn<\/span><span class="cmdty-flag extreme">Extreme long<\/span>/);
+  assert.match(nav(), /Wheat<\/span><span class="cmdty-flag extreme">Extreme short<\/span>/);
+  assert.match(nav(), /Bitcoin<\/span><span class="cmdty-flag near">Near-extreme light<\/span>/);  // asset managers: light, not short
+  assert.match(nav(), /Ether<\/span><span class="cmdty-flag extreme">Extreme light<\/span>/);
+  // Opening a group is remembered; choosing a market there charts it and keeps the groups as they were.
+  const summary = (group) => ({closest: (s) => s === 'summary' ? {parentElement: {dataset: {group}}} : null});
+  let prevented = false;
+  app.element('cmdty-nav').handlers.click({target: summary('financial:crypto'), preventDefault() { prevented = true; }});
+  assert.ok(prevented);
+  assert.match(nav(), /data-group="financial:crypto" open>/);
+  assert.deepEqual(app.storage['ivl-view'].cgroups, ['physical:energy', 'financial:crypto']);
+  const pick = (code) => ({closest: (s) => s === 'button[data-commodity]' ? {dataset: {commodity: code}} : null});
+  app.element('cmdty-nav').handlers.click({target: pick('146021')});
+  assert.equal(app.element('cmdty-chart-title').textContent, 'Ether and positioning');
+  assert.match(nav(), /data-commodity="146021" aria-pressed="true" class="selected">/);
+  assert.match(app.element('cmdty-groups').innerHTML, /data-commodity="146021"[^>]*aria-pressed="true"/);  // the cards below follow
+  app.element('cmdty-nav').handlers.click({target: summary('physical:energy'), preventDefault() {}});
+  assert.match(nav(), /data-group="physical:energy"><summary>/);  // closed again
+  // A card chosen below opens its group in the navigator.
+  app.element('cmdty-groups').handlers.click({type: 'click', target: {closest: (s) => s === '[data-commodity]' ? {dataset: {commodity: '002602'}} : null}});
+  assert.match(nav(), /data-group="physical:grains" open>/);
+  assert.equal(renderEarnings(null, {}, {macro: {cards: []}, commodities, saved: {page: 'commodities', cgroups: []}}).element('cmdty-nav').innerHTML.includes(' open>'), false);
+});
+
 test('a report saved by 3.3.0 still shows its commodities under the older field names', () => {
   const old = (code, name, oi, index) => ({code, name, exchange: 'NYMEX', symbol: 'CL=F', open_interest: oi, index, managed_pct: 5.4, producers_pct: 15.7,
     as_of: '2026-09-15', price: 95.13, price_as_of: '2026-09-24', price_history: cmdtyWeeks.map((d, i) => [d, 50 + (i % 40)]),
