@@ -53,6 +53,7 @@ TTL_HOURS = {("history", "put_call_archive"): 24 * 30}  # Cboe no longer updates
 COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
     ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31" and bool(item.get("rsi")),
     ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
+    ("macro", "cot"): lambda item: bool(item.get("leveraged_history")),  # before 2.8.0: the leverage chart needs it
 }
 SESSION_KINDS = {"macro", "history", "benchmarks"}  # news and social posts keep arriving while markets are closed
 NEWS_URL = "https://www.alphavantage.co/query"
@@ -211,8 +212,8 @@ def parse_cnn(text, today):
                 detail="CNN’s seven-component Fear & Greed index. Includes volatility and options inputs already shown here, so it is not an independent confirmation. Public website feed may be unavailable; no official API guarantee.")
 
 
-def request_text(client, url, errors="strict", **kwargs):
-    # Bounded requests, no anti-bot workarounds and no leaking API keys in failure messages.
+def request_bytes(client, url, **kwargs):
+    """The body and headers of one bounded request; no anti-bot workarounds and no leaking API keys in failure messages."""
     with client.stream("GET", url, **kwargs) as response:
         if response.status_code != 200:
             raise ValueError(f"Provider unavailable (HTTP {response.status_code})")
@@ -221,7 +222,11 @@ def request_text(client, url, errors="strict", **kwargs):
             data.extend(chunk)
             if len(data) > 3_000_000:
                 raise ValueError("Provider response too large")
-    return data.decode("utf-8", errors)
+    return bytes(data), response.headers
+
+
+def request_text(client, url, errors="strict", **kwargs):
+    return request_bytes(client, url, **kwargs)[0].decode("utf-8", errors)
 
 
 def session_of(item):
@@ -565,13 +570,14 @@ def parse_cot(rows, today):
                             dealers=round(dealer_net), dealers_index=cot_index([weeks[code][d][2] for d in days], dealer_net),
                             open_interest=round(interest), asset_managers_pct_oi=share(last, 0),
                             history=[[d.isoformat(), share(d, 0)] for d in days],
+                            leveraged_history=[[d.isoformat(), share(d, 1)] for d in days],
                             dealer_history=[[d.isoformat(), share(d, 2)] for d in days])
     spx = groups.pop("13874A")
     index, share = spx["asset_managers_index"], spx["asset_managers_pct_oi"]
     packed = lambda g: {k: v for k, v in g.items() if not k.endswith("history")}
     return dict(as_of=spx["as_of"], value=share, reading=f"{share:+.1f}% of OI".replace("-", "\u2212"),
                 index=index, groups=[packed(spx), *(packed(g) for g in groups.values())],
-                history=spx["history"], dealer_history=spx["dealer_history"],
+                history=spx["history"], dealer_history=spx["dealer_history"], leveraged_history=spx["leveraged_history"],
                 signal="Institutions heavily long" if index >= 80 else "Institutions lightly long" if index <= 20 else "Typical positioning",
                 direction=1 if index >= 80 else -1 if index <= 20 else 0,
                 detail=("CFTC Traders in Financial Futures, E-mini S&P 500 futures only. Reading: asset managers' (pension funds, "
@@ -899,7 +905,8 @@ def evaluate(payload, inputs, *, now=None):
             item["status"] = "stale"
         if key == "cnn":
             item = with_replica(item, macro.get("fear_greed") or {}, today)
-        item.pop("history", None)  # histories live once, in the chart data below
+        for name in [k for k in item if k.endswith("history")]:
+            item.pop(name)  # histories live once, in the chart data below
         cards.append(item)
     payload["macro_sentiment"] = {"cards": cards, "checked_at": inputs.get("collected_at"),
                                   "history": chart_history(macro, inputs.get("history", {}))}
@@ -946,5 +953,7 @@ def evaluate(payload, inputs, *, now=None):
 
 
 def enrich(payload):
+    """Score sentiment into the payload; returns the collected inputs, which the leverage panel reads COT from."""
     inputs = collect(payload["rows"])
     evaluate(payload, inputs)
+    return inputs

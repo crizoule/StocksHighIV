@@ -19,7 +19,7 @@
   const FRAME_WINDOW = { "1H": "1 wk", "4H": "1 mo", "1D": "6 mo", "1W": "2 yr", "1M": "5 yr" };
   const $ = (id) => document.getElementById(id);
 
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, macroOpen: true };
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, macroOpen: true, lseries: "finra", lrange: "10Y", llog: false, leverOpen: true };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
@@ -27,12 +27,15 @@
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
     if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot", "rsi", "macd"].includes(saved.mseries)) state.mseries = saved.mseries;
-    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
-    if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; }
+    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
+    if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_bull", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
+    if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.lrange)) state.lrange = saved.lrange;
+    if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; state.llog = saved.llog === true; state.leverOpen = saved.leverOpen !== false; }
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
-      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog, macroOpen: state.macroOpen }));
+      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog, macroOpen: state.macroOpen,
+        lseries: state.lseries, lrange: state.lrange, llog: state.llog, leverOpen: state.leverOpen }));
     } catch (err) { /* ignore */ }
   };
 
@@ -199,39 +202,93 @@
     renderMacroChart();
   };
 
-  /* ---------- macro chart: S&P 500 above, one sentiment series below, on one time axis ---------- */
+  /* ---------- market leverage: every card dated by its own release ---------- */
+  const LEVER_CARDS = [
+    {key: "finra", name: "Margin debt · FINRA", short: "Margin debt", url: "https://www.finra.org/rules-guidance/key-topics/margin-accounts/margin-statistics"},
+    {key: "z1", name: "Margin loans · Fed Z.1", short: "Margin ÷ stocks", url: "https://www.federalreserve.gov/releases/z1/"},
+    {key: "ofr", name: "Hedge fund leverage · OFR", short: "Hedge funds", url: "https://www.financialresearch.gov/hedge-fund-monitor/"},
+    {key: "cot", name: "Leveraged funds · CFTC", short: "Leveraged funds", url: "https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm"},
+    {key: "etf", name: "Leveraged ETFs · daily", short: "3× ETFs", url: "https://finance.yahoo.com/quote/TQQQ/history/"},
+    {key: "fsr", name: "Fed Financial Stability Report", short: "Fed FSR", url: "https://www.federalreserve.gov/publications/financial-stability-report.htm"},
+  ];
+  const CADENCE = {daily: "daily, after each close", weekly: "weekly", monthly: "monthly", quarterly: "quarterly", semiannual: "twice a year"};
+  const mediumDate = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const monthYear = new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+  const isoDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || "");
+  // A scheduled date is the publisher's own; an estimate follows the source's usual rhythm and can slip.
+  const nextRelease = (c) => {
+    if (!isoDate(c.next)) return "Not announced";
+    const today = isoET.format(new Date(Date.now()));
+    const approx = c.next_basis === "scheduled" ? "" : "~";
+    const when = `${approx}${c.next_precision === "month" ? monthYear.format(day(c.next)) : longDate.format(day(c.next))}`;
+    const basis = c.next_basis === "scheduled" ? `${c.next_time ? `${esc(c.next_time)} · ` : ""}publisher's schedule` : "estimated";
+    if (c.next < today) return `<span class="due">Due since ${esc(when)} · not in this data yet</span>`;
+    return `${esc(when)}${c.next === today ? " (today)" : ""} · ${basis}`;
+  };
+  const renderLeverage = () => {
+    const saved = DATA.market_leverage?.cards || [];
+    const cards = LEVER_CARDS.map(d => ({...d, ...(saved.find(c => c.key === d.key) || {})}))
+      .map(c => ({...c, usable: ["ok", "cached"].includes(c.status) && isoDate(c.as_of)}));
+    $("lever-toggle").setAttribute("aria-expanded", String(state.leverOpen));
+    $("lever-body").hidden = !state.leverOpen;
+    $("lever-oneline").hidden = state.leverOpen;
+    $("lever-oneline").innerHTML = cards.map(c => `<span><b>${esc(c.short)}</b> ${c.usable ? `${esc(c.reading)} · ${esc(c.signal)}` : "—"}</span>`).join("");
+    const ranked = cards.filter(c => c.usable && c.tone), elevated = ranked.filter(c => c.tone === "high").length;
+    $("lever-summary").textContent = ranked.length < 3 ? "Limited coverage" : elevated ? `${elevated} of ${ranked.length} measures elevated` : "Within usual ranges";
+    $("lever-summary").className = `sentiment-badge${ranked.length >= 3 && elevated ? " elevated" : ""}`;
+    $("lever-note").textContent = `${cards.filter(c => c.usable).length}/${cards.length} sources available · Each reading is ranked against its own history, and each card gives the period its data covers, when that was released and when the next release is due. ${DATA.market_leverage?.checked_at ? `Sources checked ${fetchedLabel(DATA.market_leverage.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect leverage."}`;
+    $("lever-cards").innerHTML = cards.map(c => {
+      const badge = !c.usable ? "unknown" : c.tone === "high" ? "elevated" : "";
+      const covers = c.usable ? `${esc(c.period || mediumDate.format(day(c.as_of)))} · ${esc(CADENCE[c.frequency] || c.frequency || "")}` : "—";
+      const dates = c.usable ? `<div class="lever-dates"><span><b>Data</b>${covers}</span>` +
+        (c.frequency === "daily" ? "" : `<span><b>Released</b>${isoDate(c.released) ? esc(mediumDate.format(day(c.released))) : "Not recorded"}</span><span><b>Next</b>${nextRelease(c)}</span>`) +
+        `</div>` : "";
+      return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.usable ? c.reading : "—")}</div>` +
+        `<span class="sentiment-badge ${badge}">${esc(c.usable ? c.signal : "Unavailable")}</span>` + dates +
+        (c.usable && (c.lines || []).length ? `<ul class="lever-lines">${c.lines.map(line => `<li>${esc(line)}</li>`).join("")}</ul>` : "") +
+        `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No reading in this report. Refresh data to collect it; no substitute value is estimated.")}</p>` +
+        (c.fetched_at ? `<p>${esc(fetchedLabel(c.fetched_at))}</p>` : "") +
+        (c.status === "cached" ? "<p>Last good reading retained; the latest refresh failed.</p>" : "") +
+        (c.pdf ? `<p>${sentimentLink(c.pdf, `Open the ${c.period || ""} report (PDF)`)}</p>` : "") +
+        `${sentimentLink(c.url, "Open provider")}</details></article>`;
+    }).join("");
+    renderLeverChart();
+  };
+
+  /* ---------- S&P 500 charts: the index above, one chosen series below, on one time axis ---------- */
   // Two panes rather than two y-scales on one plot: rescaling either axis could make any two lines look related.
   const MACRO_RANGES = [["1M", "1 month", 0, 1], ["3M", "3 months", 0, 3], ["6M", "6 months", 0, 6], ["1Y", "1 year", 1, 0], ["5Y", "5 years", 5, 0], ["10Y", "10 years", 10, 0], ["20Y", "20 years", 20, 0], ["MAX", "Since 1987"]];
   const MACRO_EARLIEST = Date.UTC(1987, 6, 1);  // AAII's survey begins in July 1987
-  const MACRO_GAP = 21 * 864e5;  // longer than any weekly step: a real gap in a series
+  // Longer than a series' own step: a real gap in the data rather than the wait for its next release.
+  const GAP_DAYS = { daily: 21, weekly: 21, monthly: 45, quarterly: 120 };
+  const gapOf = (series) => (GAP_DAYS[series.frequency] || 21) * 864e5;
+  const signedFmt = (digits, unit) => (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(v))}${unit}`;
   const MACRO_SERIES = {
-    aaii: { short: "AAII spread", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))} pp`, ref: 0, refLabel: "line at 0: bulls = bears" },
+    aaii: { short: "AAII spread", fmt: signedFmt(1, " pp"), ref: 0, refLabel: "line at 0: bulls = bears" },
     vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
     rsi: { short: "RSI 14", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: gains balance losses", derived: true },
-    macd: { short: "MACD", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}%`, ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", histogram: true, derived: true },
-    cot: { short: "COT net", fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf1.format(Math.abs(v))}%`, ref: 0,
-           refLabel: "line at 0: net flat", second: "dealers" },
+    macd: { short: "MACD", fmt: signedFmt(2, "%"), ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", histogram: true, derived: true },
+    cot: { short: "COT net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat", second: "dealers" },
+  };
+  const LEVER_SERIES = {
+    finra: { short: "Margin debt, 12-month change", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: no change in a year" },
+    z1: { short: "Margin loans ÷ stocks", fmt: (v) => `${nf2.format(v)}%`, ref: null },
+    ofr: { short: "Hedge fund leverage", fmt: (v) => `${nf2.format(v)}×`, ref: null },
+    ofr_gne: { short: "Hedge funds incl. derivatives", fmt: (v) => `${nf2.format(v)}×`, ref: null },
+    cot_lev: { short: "Leveraged funds net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat" },
+    etf_bull: { short: "3× ETF bull share", fmt: (v) => `${nf1.format(v)}%`, ref: 50, refLabel: "line at 50: bull and bear volume equal" },
+    etf_activity: { short: "3× ETF volume ÷ SPY + QQQ", fmt: (v) => `${nf1.format(v)}%`, ref: null },
   };
   const monthsBack = (t, years, months) => {
     if (years === undefined) return MACRO_EARLIEST;
     const d = new Date(t); d.setUTCMonth(d.getUTCMonth() - months - 12 * years); return d.getTime();
   };
-  let macroCache = null;
-  const macroData = () => {
-    const history = DATA.macro_sentiment?.history;
-    if (macroCache && macroCache.source === history) return macroCache;
-    const points = (pairs) => (Array.isArray(pairs) ? pairs : [])
-      .filter((p) => Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && isNum(p[1]))
-      .map(([d, v]) => ({ t: day(d).getTime(), d, v })).sort((a, b) => a.t - b.t);
-    const series = {};
-    for (const key of Object.keys(MACRO_SERIES)) series[key] = { ...(history?.series?.[key] || {}), points: points(history?.series?.[key]?.points),
-      signal: points(history?.series?.[key]?.signal) };
-    macroCache = { source: history, spx: points(history?.spx), series };
-    return macroCache;
-  };
-  const lastAtOrBefore = (points, t) => {  // binary search; weekly AAII carries forward between surveys
+  const datedPoints = (pairs) => (Array.isArray(pairs) ? pairs : [])
+    .filter((p) => Array.isArray(p) && /^\d{4}-\d{2}-\d{2}$/.test(p[0]) && isNum(p[1]))
+    .map(([d, v]) => ({ t: day(d).getTime(), d, v })).sort((a, b) => a.t - b.t);
+  const lastAtOrBefore = (points, t) => {  // binary search; weekly and quarterly series carry forward between releases
     let lo = 0, hi = points.length - 1, found = null;
     while (lo <= hi) { const mid = (lo + hi) >> 1; if (points[mid].t <= t) { found = points[mid]; lo = mid + 1; } else hi = mid - 1; }
     return found;
@@ -242,14 +299,14 @@
     for (let i = 0; i < n; i++) { ab += (a[i] - ma) * (b[i] - mb); aa += (a[i] - ma) ** 2; bb += (b[i] - mb) ** 2; }
     return aa && bb ? ab / Math.sqrt(aa * bb) : null;
   };
-  const macroWindow = (spx, points, start, end) => {
+  const macroWindow = (spx, points, start, end, gap) => {
     const px = spx.filter((p) => p.t >= start && p.t <= end), ind = points.filter((p) => p.t >= start && p.t <= end);
     const values = ind.map((p) => p.v);
     // Correlation of changes, at the indicator's own frequency: its change vs the S&P 500's return between the same dates.
     const pairs = ind.map((p) => [p.v, lastAtOrBefore(spx, p.t)]).filter(([, c]) => c);
     const dv = [], dr = [];
     for (let i = 1; i < pairs.length; i++) {
-      if (ind[i].t - ind[i - 1].t > MACRO_GAP) continue;  // a change across a data gap is not a weekly or daily move
+      if (ind[i].t - ind[i - 1].t > gap) continue;  // a change across a data gap is not one step of the series
       dv.push(pairs[i][0] - pairs[i - 1][0]); dr.push(pairs[i][1].v / pairs[i - 1][1].v - 1);
     }
     return {
@@ -283,132 +340,153 @@
     return v < 0 ? `−${text}` : text;
   };
   const relation = (r) => !isNum(r) ? "—" : `${r >= 0 ? "+" : "−"}${nf2.format(Math.abs(r))} · ${Math.abs(r) < 0.2 ? "little relation" : r > 0 ? "moves with" : "moves against"}`;
-  let macroHover = null;
-  const renderMacroChart = () => {
-    document.querySelectorAll("#macro-series-seg button").forEach((b) => { const on = b.dataset.mseries === state.mseries; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
-    $("macro-log").checked = state.mlog;
-    document.querySelectorAll("#macro-range-seg button").forEach((b) => { const on = b.dataset.mrange === state.mrange; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
-    const data = macroData(), meta = MACRO_SERIES[state.mseries], series = data.series[state.mseries];
-    const name = renamed(series.name) || meta.short;
-    macroHover = null;
-    if (data.spx.length < 2) {
-      $("macro-legend").innerHTML = "";
-      $("macro-plot").innerHTML = `<p class="macro-empty">S&amp;P 500 history appears after the next data refresh.</p>`;
-      $("macro-windows").innerHTML = "";
-      $("macro-chart-note").textContent = "";
-      $("macro-windows-note").textContent = "";
-      return;
-    }
-    const end = data.spx[data.spx.length - 1].t;
-    const [, label, years, months] = MACRO_RANGES.find(([key]) => key === state.mrange);
-    const phrase = years === undefined ? "since 1987" : `over ${label}`;
-    const start = monthsBack(end, years, months);
-    const w = macroWindow(data.spx, series.points, start, end);
-    const first = series.points[0];
-    $("macro-chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
-    const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
-    $("macro-legend").innerHTML =
-      `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
-      `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>` +
-      (meta.second && series.signal.length ? `<span><i class="key key-ind2" aria-hidden="true"></i>${esc(meta.second)} ${esc(meta.fmt(series.signal[series.signal.length - 1].v))}</span>` : "");
-    const W = Math.max(240, $("macro-plot").clientWidth || 960);
-    const m = { left: 64, right: 14 }, top = 22, h1 = 186, gap = 34, h2 = 104, axis = 22, H = top + h1 + gap + h2 + axis;  // pane labels sit above each pane
-    const x = (t) => m.left + ((t - start) / Math.max(end - start, 1)) * (W - m.left - m.right);
-    const pane = (points, y0, height, ref, log = false) => {  // log: equal percentage moves take equal height
-      const f = log ? Math.log10 : (v) => v, inv = (v) => (log ? 10 ** v : v);
-      const values = points.map((p) => f(p.v)).concat(isNum(ref) ? [f(ref)] : []);
-      let lo = Math.min(...values), hi = Math.max(...values);
-      if (lo === hi) { lo -= 1; hi += 1; }
-      const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-      const decades = log ? logTicks(inv(lo), inv(hi)) : null;
-      const scale = decades ? { values: decades, step: 1 } : ticks(inv(lo), inv(hi), height > 150 ? 4 : 3);
-      return { y: (v) => y0 + (1 - (f(v) - lo) / (hi - lo)) * height, step: scale.step, ticks: scale.values.filter((v) => f(v) >= lo && f(v) <= hi) };
+  const FREQUENCY_NOUN = { daily: "daily", weekly: "weekly", monthly: "monthly", quarterly: "quarterly" };
+  /* One chart per panel: `id` prefixes its elements, `keys` names its state (series, range, log scale). */
+  const makeChart = ({ id, meta: SERIES, spx: spxSource, series: seriesSource, keys }) => {
+    const el = (part) => $(`${id}-${part}`);
+    let cache = null, hover = null;
+    const chartData = () => {
+      const spx = spxSource(), history = seriesSource();
+      if (cache && cache.spxSource === spx && cache.history === history) return cache;
+      const series = {};
+      for (const key of Object.keys(SERIES)) series[key] = { ...(history?.[key] || {}), points: datedPoints(history?.[key]?.points), signal: datedPoints(history?.[key]?.signal) };
+      cache = { spxSource: spx, history, spx: datedPoints(spx), series };
+      return cache;
     };
-    const path = (points, y) => points.map((p, i) => `${i && p.t - points[i - 1].t <= MACRO_GAP ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
-    const top2 = top + h1 + gap;
-    // MACD's signal line shares the pane, so the scale covers both lines and the bars between them.
-    const second = meta.second ? series.signal.filter((p) => p.t >= start && p.t <= end) : [];
-    const signalAt = new Map(second.map((p) => [p.t, p.v]));
-    const bars = meta.histogram ? w.ind.filter((p) => signalAt.has(p.t)).map((p) => ({ t: p.t, v: p.v - signalAt.get(p.t) })) : [];
-    const P = pane(w.px, top, h1, null, state.mlog), I = w.ind.length ? pane(w.ind.concat(second, bars), top2, h2, meta.ref) : null;
-    const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
-      `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
-    // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
-    // every other month for six months, even spacing below that.
-    const span = end - start, days = span / 864e5, xTicks = [];
-    if (days <= 120) for (let i = 0; i <= 4; i++) xTicks.push(start + (span * i) / 4);
-    else {
-      const every = days > 20 * 365 ? 60 : days > 6.5 * 365 ? 24 : days > 400 ? 12 : days > 200 ? 3 : 2, first = new Date(start);
-      for (let d = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 1)); d.getTime() <= end; d.setUTCMonth(d.getUTCMonth() + 1)) {
-        if ((d.getUTCFullYear() * 12 + d.getUTCMonth()) % every === 0) xTicks.push(d.getTime());
+    const render = () => {
+      document.querySelectorAll(`#${id}-series-seg button`).forEach((b) => { const on = b.dataset[keys.series] === state[keys.series]; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
+      el("log").checked = state[keys.log];
+      document.querySelectorAll(`#${id}-range-seg button`).forEach((b) => { const on = b.dataset[keys.range] === state[keys.range]; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
+      const data = chartData(), meta = SERIES[state[keys.series]], series = data.series[state[keys.series]];
+      const name = renamed(series.name) || meta.short, gap = gapOf(series), log = state[keys.log];
+      hover = null;
+      if (data.spx.length < 2) {
+        el("legend").innerHTML = "";
+        el("plot").innerHTML = `<p class="macro-empty">S&amp;P 500 history appears after the next data refresh.</p>`;
+        el("windows").innerHTML = "";
+        el("chart-note").textContent = "";
+        el("windows-note").textContent = "";
+        return;
       }
-    }
-    const xFmt = (t) => { const d = new Date(t); return span <= 120 * 864e5 ? shortDate.format(d) : span <= 400 * 864e5 ? `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCFullYear()}` : String(d.getUTCFullYear()); };
-    const anchor = (t) => x(t) < m.left + 24 ? "start" : x(t) > W - m.right - 24 ? "end" : "middle";
-    const labels = [];  // skip labels that would touch on narrow screens (about 7px per mono character)
-    for (const t of xTicks) if (!labels.length || x(t) - x(labels[labels.length - 1]) >= (xFmt(t).length + 2) * 7) labels.push(t);
-    // Every session gets a bar while there is room; on longer ranges bars group into periods, each keeping its
-    // last session's value, the way a weekly or monthly chart does. The lines stay at full daily detail.
-    const room = Math.max(1, Math.floor((W - m.left - m.right) / 2.4));
-    const perBar = Math.max(1, Math.ceil(bars.length / room));
-    const grouped = perBar === 1 ? bars : bars.filter((_, i) => i % perBar === perBar - 1 || i === bars.length - 1);
-    const barWidth = Math.max(1, Math.min(8, ((W - m.left - m.right) / Math.max(grouped.length, 1)) * 0.62));
-    const barSpan = grouped.length > 1 ? (grouped[grouped.length - 1].t - grouped[0].t) / (grouped.length - 1) / 864e5 : 0;
-    const barPeriod = perBar === 1 ? "" : barSpan <= 10 ? "weekly bars" : barSpan <= 45 ? "monthly bars" : barSpan <= 120 ? "quarterly bars" : "yearly bars";
-    const histogram = I ? grouped.map((b, i) => {
-      const shrinking = i && Math.abs(b.v) < Math.abs(grouped[i - 1].v);
-      const y0 = I.y(0), y1 = I.y(b.v);
-      return `<rect class="hist ${b.v >= 0 ? "hist-up" : "hist-down"}${shrinking ? " hist-fading" : ""}" x="${(x(b.t) - barWidth / 2).toFixed(1)}" ` +
-        `y="${Math.min(y0, y1).toFixed(1)}" width="${barWidth.toFixed(2)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}"/>`;
-    }).join("") : "";
-    const markers = I && w.ind.length <= 60 && series.frequency === "weekly"
-      ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
-    $("macro-plot").innerHTML =
-      `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 ${phrase} above ${esc(name)} on the same dates">` +
-      grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y)}"/>` +
-      `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${state.mlog ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
-      (I ? grid(I, m.left - 8) +
-        (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
-        histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y)}"/>${markers}`
-        : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
-      `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}${barPeriod ? ` · ${barPeriod}` : ""}</tspan>` : ""}</text>` +
-      labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
-      `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/><circle class="dot-ind" r="4"/></g>` +
-      `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
-    macroHover = { x, P, I, w, start, end, name, meta, W, m };
-    const unit = series.frequency === "weekly" ? "weekly" : "daily";
-    const weeklyNote = unit === "daily" ? " Points older than 10 years are weekly, so long ranges mix weekly and daily changes." : "";
-    $("macro-windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th><th scope="col">${esc(meta.short)} average</th>` +
-      `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of changes</th></tr></thead><tbody>` +
-      MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
-        const s = macroWindow(data.spx, series.points, monthsBack(end, y, mo), end);
-        return `<tr${key === state.mrange ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
-          `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` +
-          `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
-          `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
-      }).join("") + "</tbody>";
-    $("macro-windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
+      const end = data.spx[data.spx.length - 1].t;
+      const [, label, years, months] = MACRO_RANGES.find(([key]) => key === state[keys.range]);
+      const phrase = years === undefined ? "since 1987" : `over ${label}`;
+      const start = monthsBack(end, years, months);
+      const w = macroWindow(data.spx, series.points, start, end, gap);
+      const first = series.points[0];
+      el("chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
+      const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
+      el("legend").innerHTML =
+        `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
+        `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>` +
+        (meta.second && series.signal.length ? `<span><i class="key key-ind2" aria-hidden="true"></i>${esc(meta.second)} ${esc(meta.fmt(series.signal[series.signal.length - 1].v))}</span>` : "");
+      const W = Math.max(240, el("plot").clientWidth || 960);
+      const m = { left: 64, right: 14 }, top = 22, h1 = 186, gapY = 34, h2 = 104, axis = 22, H = top + h1 + gapY + h2 + axis;  // pane labels sit above each pane
+      const x = (t) => m.left + ((t - start) / Math.max(end - start, 1)) * (W - m.left - m.right);
+      const pane = (points, y0, height, ref, logScale = false) => {  // log: equal percentage moves take equal height
+        const f = logScale ? Math.log10 : (v) => v, inv = (v) => (logScale ? 10 ** v : v);
+        const values = points.map((p) => f(p.v)).concat(isNum(ref) ? [f(ref)] : []);
+        let lo = Math.min(...values), hi = Math.max(...values);
+        if (lo === hi) { lo -= 1; hi += 1; }
+        const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+        const decades = logScale ? logTicks(inv(lo), inv(hi)) : null;
+        const scale = decades ? { values: decades, step: 1 } : ticks(inv(lo), inv(hi), height > 150 ? 4 : 3);
+        return { y: (v) => y0 + (1 - (f(v) - lo) / (hi - lo)) * height, step: scale.step, ticks: scale.values.filter((v) => f(v) >= lo && f(v) <= hi) };
+      };
+      const path = (points, y, step) => points.map((p, i) => `${i && p.t - points[i - 1].t <= step ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+      const top2 = top + h1 + gapY;
+      // MACD's signal line shares the pane, so the scale covers both lines and the bars between them.
+      const second = meta.second ? series.signal.filter((p) => p.t >= start && p.t <= end) : [];
+      const signalAt = new Map(second.map((p) => [p.t, p.v]));
+      const bars = meta.histogram ? w.ind.filter((p) => signalAt.has(p.t)).map((p) => ({ t: p.t, v: p.v - signalAt.get(p.t) })) : [];
+      const P = pane(w.px, top, h1, null, log), I = w.ind.length ? pane(w.ind.concat(second, bars), top2, h2, meta.ref) : null;
+      const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
+        `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
+      // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
+      // every other month for six months, even spacing below that.
+      const span = end - start, days = span / 864e5, xTicks = [];
+      if (days <= 120) for (let i = 0; i <= 4; i++) xTicks.push(start + (span * i) / 4);
+      else {
+        const every = days > 20 * 365 ? 60 : days > 6.5 * 365 ? 24 : days > 400 ? 12 : days > 200 ? 3 : 2, firstTick = new Date(start);
+        for (let d = new Date(Date.UTC(firstTick.getUTCFullYear(), firstTick.getUTCMonth() + 1, 1)); d.getTime() <= end; d.setUTCMonth(d.getUTCMonth() + 1)) {
+          if ((d.getUTCFullYear() * 12 + d.getUTCMonth()) % every === 0) xTicks.push(d.getTime());
+        }
+      }
+      const xFmt = (t) => { const d = new Date(t); return span <= 120 * 864e5 ? shortDate.format(d) : span <= 400 * 864e5 ? `${d.toLocaleString("en-US", { month: "short", timeZone: "UTC" })} ${d.getUTCFullYear()}` : String(d.getUTCFullYear()); };
+      const anchor = (t) => x(t) < m.left + 24 ? "start" : x(t) > W - m.right - 24 ? "end" : "middle";
+      const labels = [];  // skip labels that would touch on narrow screens (about 7px per mono character)
+      for (const t of xTicks) if (!labels.length || x(t) - x(labels[labels.length - 1]) >= (xFmt(t).length + 2) * 7) labels.push(t);
+      // Every session gets a bar while there is room; on longer ranges bars group into periods, each keeping its
+      // last session's value, the way a weekly or monthly chart does. The lines stay at full daily detail.
+      const room = Math.max(1, Math.floor((W - m.left - m.right) / 2.4));
+      const perBar = Math.max(1, Math.ceil(bars.length / room));
+      const grouped = perBar === 1 ? bars : bars.filter((_, i) => i % perBar === perBar - 1 || i === bars.length - 1);
+      const barWidth = Math.max(1, Math.min(8, ((W - m.left - m.right) / Math.max(grouped.length, 1)) * 0.62));
+      const barSpan = grouped.length > 1 ? (grouped[grouped.length - 1].t - grouped[0].t) / (grouped.length - 1) / 864e5 : 0;
+      const barPeriod = perBar === 1 ? "" : barSpan <= 10 ? "weekly bars" : barSpan <= 45 ? "monthly bars" : barSpan <= 120 ? "quarterly bars" : "yearly bars";
+      const histogram = I ? grouped.map((b, i) => {
+        const shrinking = i && Math.abs(b.v) < Math.abs(grouped[i - 1].v);
+        const y0 = I.y(0), y1 = I.y(b.v);
+        return `<rect class="hist ${b.v >= 0 ? "hist-up" : "hist-down"}${shrinking ? " hist-fading" : ""}" x="${(x(b.t) - barWidth / 2).toFixed(1)}" ` +
+          `y="${Math.min(y0, y1).toFixed(1)}" width="${barWidth.toFixed(2)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}"/>`;
+      }).join("") : "";
+      // Sparse series (weekly or slower) mark each observation while few enough fit, so releases read as points.
+      const markers = I && w.ind.length <= 60 && series.frequency && series.frequency !== "daily"
+        ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
+      el("plot").innerHTML =
+        `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 ${phrase} above ${esc(name)} on the same dates">` +
+        grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y, GAP_DAYS.daily * 864e5)}"/>` +
+        `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${log ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
+        (I ? grid(I, m.left - 8) +
+          (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
+          histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y, gap)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y, gap)}"/>${markers}`
+          : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
+        `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}${barPeriod ? ` · ${barPeriod}` : ""}</tspan>` : ""}</text>` +
+        labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
+        `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/><circle class="dot-ind" r="4"/></g>` +
+        `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
+      hover = { x, P, I, w, start, end, name, meta, W, m };
+      const unit = FREQUENCY_NOUN[series.frequency] || "daily";
+      const weeklyNote = unit === "daily" ? " Points older than 10 years are weekly, so long ranges mix weekly and daily changes." : "";
+      el("windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th><th scope="col">${esc(meta.short)} average</th>` +
+        `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of changes</th></tr></thead><tbody>` +
+        MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
+          const s = macroWindow(data.spx, series.points, monthsBack(end, y, mo), end, gap);
+          return `<tr${key === state[keys.range] ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
+            `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` +
+            `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
+            `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
+        }).join("") + "</tbody>";
+      el("windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
+    };
+    const move = (ev) => {
+      const svg = ev.target.closest(".macro-svg");
+      if (!svg || !hover) return;
+      const { x, P, I, w, start, end, name, meta, W, m } = hover;
+      const box = svg.getBoundingClientRect();
+      const t = start + ((ev.clientX - box.left) * (W / box.width) - m.left) / (W - m.left - m.right) * (end - start);
+      const px = lastAtOrBefore(w.px, t) || w.px[0];
+      if (!px) return;
+      const ind = I ? lastAtOrBefore(w.ind, px.t) : null;
+      const hair = svg.querySelector(".xhair");
+      hair.removeAttribute("hidden");
+      hair.querySelector("line").setAttribute("x1", x(px.t).toFixed(1));
+      hair.querySelector("line").setAttribute("x2", x(px.t).toFixed(1));
+      const [dotPx, dotInd] = hair.querySelectorAll("circle");
+      dotPx.setAttribute("cx", x(px.t).toFixed(1)); dotPx.setAttribute("cy", P.y(px.v).toFixed(1));
+      if (ind) { dotInd.removeAttribute("hidden"); dotInd.setAttribute("cx", x(px.t).toFixed(1)); dotInd.setAttribute("cy", I.y(ind.v).toFixed(1)); }
+      else dotInd.setAttribute("hidden", "");
+      showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
+    };
+    const leave = () => { el("plot").querySelector?.(".xhair")?.setAttribute("hidden", ""); hideTip(); };
+    return { render, move, leave };
   };
-  const hoverMacro = (ev) => {
-    const svg = ev.target.closest(".macro-svg");
-    if (!svg || !macroHover) return;
-    const { x, P, I, w, start, end, name, meta, W, m } = macroHover;
-    const box = svg.getBoundingClientRect();
-    const t = start + ((ev.clientX - box.left) * (W / box.width) - m.left) / (W - m.left - m.right) * (end - start);
-    const px = lastAtOrBefore(w.px, t) || w.px[0];
-    if (!px) return;
-    const ind = I ? lastAtOrBefore(w.ind, px.t) : null;
-    const hair = svg.querySelector(".xhair");
-    hair.removeAttribute("hidden");
-    hair.querySelector("line").setAttribute("x1", x(px.t).toFixed(1));
-    hair.querySelector("line").setAttribute("x2", x(px.t).toFixed(1));
-    const [dotPx, dotInd] = hair.querySelectorAll("circle");
-    dotPx.setAttribute("cx", x(px.t).toFixed(1)); dotPx.setAttribute("cy", P.y(px.v).toFixed(1));
-    if (ind) { dotInd.removeAttribute("hidden"); dotInd.setAttribute("cx", x(px.t).toFixed(1)); dotInd.setAttribute("cy", I.y(ind.v).toFixed(1)); }
-    else dotInd.setAttribute("hidden", "");
-    showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
-  };
-  const leaveMacro = () => { $("macro-plot").querySelector?.(".xhair")?.setAttribute("hidden", ""); hideTip(); };
+  const spxHistory = () => DATA.macro_sentiment?.history?.spx;
+  const macroChart = makeChart({ id: "macro", meta: MACRO_SERIES, spx: spxHistory, series: () => DATA.macro_sentiment?.history?.series,
+                                 keys: { series: "mseries", range: "mrange", log: "mlog" } });
+  const leverChart = makeChart({ id: "lever", meta: LEVER_SERIES, spx: spxHistory, series: () => DATA.market_leverage?.series,
+                                 keys: { series: "lseries", range: "lrange", log: "llog" } });
+  const renderMacroChart = macroChart.render, renderLeverChart = leverChart.render;
 
   /* ---------- views ---------- */
   const onTsx = (r) => r.market === "CA" || Boolean(r.also_listed);
@@ -883,6 +961,7 @@
   const render = () => {
     U = (DATA.universe_by_cap && DATA.universe_by_cap[state.cap]) || DATA.universe;
     renderMacro();
+    renderLeverage();
     renderStatic();
     $("cap-panel").setAttribute("aria-labelledby", `cap-${state.cap}`);
     document.querySelectorAll("#cap-tabs button").forEach((b) => {
@@ -1070,8 +1149,14 @@
   wireSeg("macro-range-seg", "mrange", (v) => { state.mrange = v; persist(); }, "aria-checked", renderMacroChart);
   $("macro-log").addEventListener("change", (ev) => { state.mlog = ev.target.checked; persist(); renderMacroChart(); });
   $("macro-toggle").addEventListener("click", () => { state.macroOpen = !state.macroOpen; persist(); renderMacro(); });
-  $("macro-plot").addEventListener("pointermove", hoverMacro);
-  $("macro-plot").addEventListener("pointerleave", leaveMacro);
+  $("macro-plot").addEventListener("pointermove", macroChart.move);
+  $("macro-plot").addEventListener("pointerleave", macroChart.leave);
+  wireSeg("lever-series-seg", "lseries", (v) => { state.lseries = v; persist(); }, "aria-checked", renderLeverChart);
+  wireSeg("lever-range-seg", "lrange", (v) => { state.lrange = v; persist(); }, "aria-checked", renderLeverChart);
+  $("lever-log").addEventListener("change", (ev) => { state.llog = ev.target.checked; persist(); renderLeverChart(); });
+  $("lever-toggle").addEventListener("click", () => { state.leverOpen = !state.leverOpen; persist(); renderLeverage(); });
+  $("lever-plot").addEventListener("pointermove", leverChart.move);
+  $("lever-plot").addEventListener("pointerleave", leverChart.leave);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });
 
   document.querySelector("thead").addEventListener("click", (ev) => {
@@ -1115,6 +1200,7 @@
 
   if ("ResizeObserver" in window) new ResizeObserver(() => drawDistribution(lastCutoff)).observe($("dist-frame"));
   if ("ResizeObserver" in window) new ResizeObserver(() => renderMacroChart()).observe($("macro-plot"));
+  if ("ResizeObserver" in window) new ResizeObserver(() => renderLeverChart()).observe($("lever-plot"));
 
   $("macro-cards").addEventListener("click", (ev) => {
     const edit = ev.target.closest("[data-aaii-edit]");

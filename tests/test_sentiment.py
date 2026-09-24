@@ -338,6 +338,7 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(spx["dealers"], -100)  # the other side of the market, shown as the chart's second line
         self.assertEqual(spx["open_interest"], 1000)  # spread positions take no side and are excluded
         self.assertEqual(item["dealer_history"][-1], [(start + timedelta(weeks=weeks - 1)).isoformat(), -10.0])
+        self.assertEqual(item["leveraged_history"][-1], [(start + timedelta(weeks=weeks - 1)).isoformat(), -5.0])  # the leverage panel's line
         self.assertEqual((vix["name"], vix["asset_managers"], vix["asset_managers_index"]), ("VIX futures", -155, 0))
         self.assertEqual(len(item["history"]), weeks)
         self.assertNotIn("history", spx)

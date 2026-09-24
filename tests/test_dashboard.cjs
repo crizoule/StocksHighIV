@@ -30,6 +30,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     watchlist: options.watchlist || [],
     universe_by_cap: options.stats,
     macro_sentiment: options.macro,
+    market_leverage: options.leverage,
     preliminary: options.preliminary,
   };
   const elements = new Map();
@@ -479,4 +480,67 @@ test('macro excludes stale data and retains source observation dates', () => {
   assert.match(app.element('macro-cards').innerHTML, /Stale · excluded/);
   assert.match(app.element('macro-cards').innerHTML, /As of 2026-08-01/);
   assert.match(app.element('macro-cards').innerHTML, /Unavailable/);
+});
+
+test('market leverage cards give each release date and the next one, and chart against the S&P 500', () => {
+  const days = [];
+  for (let t = Date.parse('2014-01-01T00:00:00Z'); t <= Date.parse('2026-09-17T00:00:00Z'); t += 864e5) {
+    const d = new Date(t);
+    if (d.getUTCDay() % 6) days.push(d.toISOString().slice(0, 10));
+  }
+  const spx = days.map((d, i) => [d, 2000 + i]);
+  const quarters = [];
+  for (let y = 2014; y <= 2026; y++) for (const q of ['03-31', '06-30', '09-30', '12-31']) if (`${y}-${q}` <= '2026-06-30') quarters.push(`${y}-${q}`);
+  const leverage = {
+    checked_at: '2026-09-18T14:00:00Z',
+    cards: [
+      {key: 'finra', status: 'ok', as_of: '2026-08-31', period: 'August 2026', reading: '$1.45T', signal: 'Rapid build-up', tone: 'high',
+       frequency: 'monthly', released: '2026-09-14', next: '2026-10-14', next_basis: 'estimated',
+       lines: ['12-month change +37.2% · 89th percentile since 1998'], detail: 'FINRA member firms'},
+      {key: 'z1', status: 'ok', as_of: '2026-06-30', period: 'Q2 2026', reading: '0.68%', signal: 'Low share of stock value borrowed', tone: 'low',
+       frequency: 'quarterly', released: '2026-09-11', next: '2026-12-10', next_basis: 'scheduled', lines: []},
+      {key: 'ofr', status: 'cached', as_of: '2026-03-31', period: 'Q1 2026', reading: '2.57×', signal: 'Near the top of its range', tone: 'high',
+       frequency: 'quarterly', released: '2026-06-04', next: '2026-09-03', next_basis: 'estimated', lines: []},
+      {key: 'cot', status: 'ok', as_of: '2026-09-15', reading: '−15.7% of OI', signal: 'Typical for 3 years', tone: 'normal',
+       frequency: 'weekly', released: '2026-09-18', next: '2026-09-25', next_basis: 'scheduled', next_time: '3:30 PM ET', lines: []},
+      {key: 'etf', status: 'ok', as_of: '2026-09-17', reading: '70% bull', signal: 'Typical bull–bear mix', tone: 'normal', frequency: 'daily', lines: []},
+      {key: 'fsr', status: 'ok', as_of: '2026-05-08', period: 'May 2026', reading: 'May 2026', signal: 'Semiannual review', tone: null,
+       frequency: 'semiannual', released: '2026-05-08', next: '2026-11-08', next_basis: 'estimated', next_precision: 'month',
+       pdf: 'https://www.federalreserve.gov/publications/files/financial-stability-report-20260508.pdf', lines: []},
+    ],
+    series: {
+      ofr: {name: 'Hedge funds: gross assets ÷ net assets', frequency: 'quarterly', source: 'OFR', points: quarters.map((d, i) => [d, 2 + i / 100])},
+      finra: {name: 'Margin debt, 12-month change', frequency: 'monthly', source: 'FINRA', points: []},
+    },
+  };
+  const app = renderEarnings(null, {}, {macro: {cards: [], history: {spx, series: {}}}, leverage, saved: {lseries: 'ofr', lrange: '5Y'}});
+  const cards = app.element('lever-cards').innerHTML;
+  assert.match(cards, /<h3>Margin debt · FINRA<\/h3><div class="macro-value">\$1.45T<\/div><span class="sentiment-badge elevated">Rapid build-up/);
+  assert.match(cards, /<b>Data<\/b>August 2026 · monthly<\/span><span><b>Released<\/b>Sep 14, 2026<\/span><span><b>Next<\/b>~Wed, Oct 14, 2026 · estimated/);
+  assert.match(cards, /<b>Next<\/b>Thu, Dec 10, 2026 · publisher&#39;s schedule|<b>Next<\/b>Thu, Dec 10, 2026 · publisher's schedule/);
+  assert.match(cards, /<span class="due">Due since ~Thu, Sep 3, 2026 · not in this data yet<\/span>/);  // an estimate that has passed
+  assert.match(cards, /Fri, Sep 25, 2026 · 3:30 PM ET · publisher's schedule/);
+  assert.match(cards, /<b>Next<\/b>~Nov 2026 · estimated/);
+  assert.match(cards, /Open the May 2026 report \(PDF\)/);
+  assert.match(cards, /Last good reading retained; the latest refresh failed/);
+  assert.match(cards, /<b>Data<\/b>Sep 17, 2026 · daily, after each close<\/span><\/div>/);  // daily: no release calendar
+  assert.match(cards, /<li>12-month change \+37.2% · 89th percentile since 1998<\/li>/);
+  assert.equal(app.element('lever-summary').textContent, '2 of 5 measures elevated');
+  assert.match(app.element('lever-summary').className, /elevated/);
+  assert.match(app.element('lever-note').textContent, /^6\/6 sources available/);
+  const plot = app.element('lever-plot').innerHTML;
+  assert.equal((plot.match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 1);  // quarterly steps are not gaps
+  assert.match(plot, /class="dot-ind" cx=/);  // each quarter marked
+  assert.match(app.element('lever-legend').innerHTML, /Hedge funds: gross assets ÷ net assets 2\.\d\d× · Jun 30/);
+  assert.match(app.element('lever-windows-note').textContent, /each quarterly change/);
+  assert.match(app.element('lever-windows').innerHTML, /<tr class="current"><th scope="row">5 years<\/th>/);
+  app.click('lever-series-seg', 'lseries', 'finra');
+  assert.match(app.element('lever-plot').innerHTML, /No Margin debt, 12-month change data in this range/);
+  assert.equal(app.storage['ivl-view'].lseries, 'finra');
+  app.element('lever-toggle').handlers.click();
+  assert.equal(app.element('lever-body').hidden, true);
+  assert.match(app.element('lever-oneline').innerHTML, /<b>Margin debt<\/b> \$1.45T · Rapid build-up/);
+  const empty = renderEarnings(null, {}, {macro: {cards: []}});
+  assert.equal(empty.element('lever-summary').textContent, 'Limited coverage');
+  assert.match(empty.element('lever-cards').innerHTML, /<h3>Hedge fund leverage · OFR<\/h3><div class="macro-value">—<\/div><span class="sentiment-badge unknown">Unavailable/);
 });

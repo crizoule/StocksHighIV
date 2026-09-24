@@ -96,6 +96,21 @@ python -m highiv sentiment
 
 This preserves the underlying market-data generation timestamp. It uses saved stock prices and fetches benchmarks; stale or mismatched stock dates require a normal data refresh before ranking resumes.
 
+## Market leverage
+
+A second panel below the sentiment panel shows how much investors are borrowing, from six free public sources. Each card shows the period its data covers, when that release came out, and when the next one is due. A due date marked **publisher's schedule** comes from the source itself. One marked **~ … estimated** follows the source's usual rhythm and can slip; once it passes without new data, the card says the release is due. The daily ETF card has no release calendar. Each reading is ranked against its own history, and the 80th percentile or above is marked elevated. The panel collapses to one line like the sentiment panel. It is refreshed with sentiment, including by `python -m highiv sentiment`.
+
+| Card | Measure | Source · cadence | Next release |
+|---|---|---|---|
+| Margin debt | Customer margin debit balances; the chart shows the 12-month change, since 1998 | [FINRA margin statistics](https://www.finra.org/rules-guidance/key-topics/margin-accounts/margin-statistics) · monthly | One month after the file's own date (estimated) |
+| Margin loans | Broker-dealer margin loans ÷ market value of US stocks, since 1945 | Fed [Z.1 Financial Accounts](https://www.federalreserve.gov/releases/z1/) via FRED · quarterly | The Fed's announced date |
+| Hedge fund leverage | Gross assets ÷ net assets, and gross notional exposure ÷ net assets, since 2013; the Fed's dealer survey on hedge-fund leverage | [OFR Hedge Fund Monitor](https://www.financialresearch.gov/hedge-fund-monitor/) (SEC Form PF) · quarterly | The same delay after quarter-end as the last release (estimated) |
+| Leveraged funds | Hedge funds' net E-mini S&P 500 futures, % of open interest | CFTC Commitments of Traders (already collected for the COT card) · weekly | Friday 3:30 PM ET |
+| Leveraged ETFs | Bull funds' share of 3× index-ETF dollar volume, and that volume against SPY + QQQ, 20-session averages, since 2010 | Yahoo daily bars · daily | — |
+| Fed Financial Stability Report | Twice-yearly review; its section 3 covers leverage in the financial sector | [Federal Reserve](https://www.federalreserve.gov/publications/financial-stability-report.htm) · spring and fall | Six months on (estimated) |
+
+The chart below the cards works like the sentiment chart: the S&P 500 above, one leverage series below, the same ranges, log switch and correlation table. Monthly and quarterly series are drawn as connected points. A gap is only a break longer than the series' own step. The ETF card is a proxy for retail appetite, not a measure of borrowing: nobody publishes retail leverage daily. Asset totals for those funds are Yahoo's latest figures, with no history. FINRA refuses browser-like request headers, so these sources are fetched with a plain `StocksHighIV` user agent. The Z.1 ratio falls as the market grows faster than margin loans, so it can read low while FINRA's dollar total sets records.
+
 ## Company logos
 
 Displayed companies use 48-pixel WebP logos (shown at 24 pixels), cached in `data/logos` for 90 days and embedded in saved dashboards for offline use. Images come from Financial Modeling Prep using the full listing symbol. Missing logos fall back to ticker initials and are retried after a day. Source downloads are capped at 256 KB and encoded icons at 12 KB; no API key is required for this image endpoint. Logo availability depends on the provider.
