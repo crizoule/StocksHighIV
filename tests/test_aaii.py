@@ -159,6 +159,22 @@ class EnteredWeekTests(unittest.TestCase):
             aaii.apply_entered(payload, data)
             self.assertEqual(payload["macro_sentiment"]["history"]["series"]["aaii"]["points"],
                              [["2026-09-09", 10.0], ["2026-09-16", -24.5]])
+            self.assertNotIn("lines", payload["macro_sentiment"]["history"]["series"]["aaii"])  # saved before 2.9.0: spread only
+
+    def test_the_three_shares_follow_the_same_weeks_as_the_spread(self):
+        with TemporaryDirectory() as data, patch.object(aaii, "bundled", return_value={date(2026, 9, 10): [40.0, 30.0, 30.0]}):
+            aaii.save_week(data, "2026-09-16", 28.8, 17.9, 53.3, date(2026, 9, 19))
+            live = {"status": "ok", "as_of": "2026-09-23", "value": 5.0, "bullish": 35.0, "neutral": 35.0, "bearish": 30.0}
+            spread_only = {"status": "ok", "as_of": "2026-09-30", "value": 1.0}  # no shares: never guessed from the spread
+            shares = aaii.share_series(data, live, spread_only, {"status": "unavailable"}, None)
+            self.assertEqual(shares["bullish"], [["2026-09-09", 40.0], ["2026-09-16", 28.8], ["2026-09-23", 35.0]])
+            self.assertEqual(shares["neutral"], [["2026-09-09", 30.0], ["2026-09-16", 17.9], ["2026-09-23", 35.0]])
+            self.assertEqual(shares["bearish"], [["2026-09-09", 30.0], ["2026-09-16", 53.3], ["2026-09-23", 30.0]])
+            lines = {name: [["2026-09-09", 40.0 if name == "bullish" else 30.0]] for name in aaii.SHARES}
+            payload = {"macro_sentiment": {"cards": [], "history": {"series": {"aaii": {"points": [["2026-09-09", 10.0]], "lines": lines}}}}}
+            aaii.apply_entered(payload, data)  # a week entered by hand shows on all three lines at once
+            self.assertEqual(payload["macro_sentiment"]["history"]["series"]["aaii"]["lines"]["bearish"],
+                             [["2026-09-09", 30.0], ["2026-09-16", 53.3]])
 
     def test_spreadsheets_are_read_only_from_the_imports_folder(self):
         self.assertEqual([p.name for p in aaii.import_folders()], ["imports"])

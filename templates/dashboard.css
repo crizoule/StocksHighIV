@@ -625,6 +625,13 @@ th.col-stock { z-index: 2; }
 .lever-dates { display: grid; gap: 2px; margin: 12px 0 10px; padding: 8px 10px; border-radius: 6px; background: var(--surface); font: 500 11px var(--font-mono); color: var(--ink-2); }
 .lever-dates b { font: 600 11px var(--font-ui); color: var(--ink-3); margin-right: 6px; }
 .lever-dates .due { color: var(--signal); }
+/* The period a reading covers: underlined so a monthly or weekly figure is never read as today's. */
+.data-date { color: var(--ink); font-weight: 600; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.data-date b, .lever-dates .data-date b { font-weight: 600; color: var(--ink); }
+.aaii-shares { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 10px 0 0; font: 500 12px var(--font-mono); }
+.aaii-shares .bull { color: var(--up); }
+.aaii-shares .neutral { color: var(--ink-2); }
+.aaii-shares .bear { color: var(--down); }
 .lever-lines { margin: 0; padding-left: 16px; color: var(--ink-2); font-size: 11px; line-height: 1.6; }
 .lever-lines li { margin: 3px 0; }
 .sentiment-method { margin-top: 18px; font-size: 12px; line-height: 1.65; color: var(--ink-2); }
@@ -646,6 +653,9 @@ th.col-stock { z-index: 2; }
 .macro-legend .key-spx { border-color: var(--ink-2); }
 .macro-legend .key-ind { border-color: var(--accent); }
 .macro-legend .key-ind2 { border-color: var(--signal); }
+.macro-legend .key-bull { border-color: var(--up); }
+.macro-legend .key-neutral { border-color: var(--ink-3); }
+.macro-legend .key-bear { border-color: var(--down); }
 .macro-plot { min-height: 120px; }
 .macro-svg { display: block; width: 100%; height: auto; overflow: visible; touch-action: pan-y; }
 .macro-svg .grid { stroke: var(--grid); stroke-width: 1; }
@@ -656,6 +666,13 @@ th.col-stock { z-index: 2; }
 .macro-svg .line-spx { stroke: var(--ink-2); }
 .macro-svg .line-ind { stroke: var(--accent); }
 .macro-svg .line-ind2 { stroke: var(--signal); stroke-width: 1.5; }
+.macro-svg .line-bull, .macro-svg .line-neutral, .macro-svg .line-bear { fill: none; stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+.macro-svg .line-bull { stroke: var(--up); }
+.macro-svg .line-neutral { stroke: var(--ink-3); stroke-dasharray: 4 3; }  /* dashed: neutral is the in-between reading */
+.macro-svg .line-bear { stroke: var(--down); }
+.macro-svg .dot-bull { fill: var(--up); stroke: var(--surface-2); stroke-width: 1.5; }
+.macro-svg .dot-neutral { fill: var(--ink-3); stroke: var(--surface-2); stroke-width: 1.5; }
+.macro-svg .dot-bear { fill: var(--down); stroke: var(--surface-2); stroke-width: 1.5; }
 .macro-svg .hist-up { fill: var(--up); }
 .macro-svg .hist-down { fill: var(--down); }
 .macro-svg .hist-fading { opacity: 0.38; }  /* a bar shorter than the one before it: the gap is closing */

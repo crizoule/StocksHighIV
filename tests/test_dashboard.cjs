@@ -319,7 +319,8 @@ test('aaii card shows its source, flags a newer published week, and saves a week
   const card = extra => ({key:'aaii', name:'AAII sentiment', url:'https://www.aaii.com/sentimentsurvey', max_age:10, status:'ok', signal:'Bearish tilt', direction:-1, ...extra});
   const html = cards => renderEarnings(null, {}, {macro:{cards}}).element('macro-cards').innerHTML;
   const imported = html([card({value:-24.5, reading:'-24.5 pp', as_of:'2026-09-17', date_label:'reported', source_file:'sentiment (1).xls'})]);
-  assert.match(imported, /As of 2026-09-17 · reported/);
+  assert.match(imported, /<p class="sentiment-meta data-date">As of Sep 17, 2026 · reported<\/p>/);  // underlined: never read as today's
+  assert.doesNotMatch(imported, /aaii-shares/);  // no shares in this reading, so none are shown
   assert.match(imported, /From AAII's spreadsheet · sentiment \(1\).xls/);
   assert.doesNotMatch(imported, /New week out/);  // on Friday Sep 18, the Sep 17 report is the latest published week
   const lastWeek = html([card({value:-10, reading:'-10.0 pp', as_of:'2026-09-09', entered:true})]);
@@ -415,7 +416,7 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(table(), /<tr class="current"><th scope="row">1 month<\/th>/);
   assert.equal(app.storage['ivl-view'].mrange, '1M');
   app.click('macro-series-seg', 'mseries', 'aaii');
-  assert.match(plot(), /class="dot-ind" cx=/);  // weekly points get markers in short ranges
+  assert.match(plot(), /class="dot-ind" cx=/);  // weekly points get markers in short ranges; a report without the shares keeps the spread
   app.click('macro-series-seg', 'mseries', 'put_call');
   assert.match(plot(), /No Equity put\/call, 5-day average data in this range/);
   app.click('macro-series-seg', 'mseries', 'cot');
@@ -478,7 +479,7 @@ test('macro excludes stale data and retains source observation dates', () => {
   assert.equal(app.element('macro-summary').textContent, 'Limited coverage');
   assert.match(app.element('macro-note').textContent, /1\/5 fresh readings/);
   assert.match(app.element('macro-cards').innerHTML, /Stale · excluded/);
-  assert.match(app.element('macro-cards').innerHTML, /As of 2026-08-01/);
+  assert.match(app.element('macro-cards').innerHTML, /As of Aug 1, 2026/);
   assert.match(app.element('macro-cards').innerHTML, /Unavailable/);
 });
 
@@ -543,4 +544,46 @@ test('market leverage cards give each release date and the next one, and chart a
   const empty = renderEarnings(null, {}, {macro: {cards: []}});
   assert.equal(empty.element('lever-summary').textContent, 'Limited coverage');
   assert.match(empty.element('lever-cards').innerHTML, /<h3>Hedge fund leverage · OFR<\/h3><div class="macro-value">—<\/div><span class="sentiment-badge unknown">Unavailable/);
+});
+
+test('AAII shows its three shares on the card and as three lines on the chart', () => {
+  const days = [];
+  for (let t = Date.parse('2025-09-01T00:00:00Z'); t <= Date.parse('2026-09-17T00:00:00Z'); t += 864e5) {
+    const d = new Date(t);
+    if (d.getUTCDay() % 6) days.push(d.toISOString().slice(0, 10));
+  }
+  const spx = days.map((d, i) => [d, 6000 + i]);
+  const weeks = days.filter(d => new Date(`${d}T00:00:00Z`).getUTCDay() === 3);
+  const bull = weeks.map((d, i) => [d, 30 + (i % 10)]), bear = weeks.map((d, i) => [d, 45 - (i % 10)]);
+  const neutral = weeks.map((d, i) => [d, 100 - bull[i][1] - bear[i][1]]);
+  const history = {spx, series: {aaii: {name: 'AAII bullish / neutral / bearish', frequency: 'weekly', source: 'AAII weekly survey',
+    points: weeks.map((d, i) => [d, bull[i][1] - bear[i][1]]), lines: {bullish: bull, neutral, bearish: bear}}}};
+  const card = {key: 'aaii', name: 'AAII sentiment', status: 'ok', max_age: 10, as_of: '2026-09-16', value: -24.5, reading: '−24.5 pp',
+                signal: 'Bearish tilt', direction: -1, bullish: 28.8, neutral: 17.9, bearish: 53.3, entered: true};
+  const app = renderEarnings(null, {}, {macro: {cards: [card], history}, saved: {mseries: 'aaii', mrange: '3M'}});
+  assert.match(app.element('macro-cards').innerHTML,
+    /<p class="aaii-shares"><span class="bull">Bullish 28.8%<\/span><span class="neutral">Neutral 17.9%<\/span><span class="bear">Bearish 53.3%<\/span><\/p>/);
+  const plot = app.element('macro-plot').innerHTML;
+  for (const cls of ['bull', 'neutral', 'bear']) {
+    assert.match(plot, new RegExp(`class="line-${cls}" d="M`));
+    assert.match(plot, new RegExp(`class="dot-${cls}" cx=`));  // weekly points marked in short ranges
+    assert.match(plot, new RegExp(`class="dot-${cls}" data-line=`));  // and followed by the crosshair
+  }
+  assert.doesNotMatch(plot, /class="line-ind"/);  // the spread is not drawn over the three shares
+  assert.match(plot, /AAII survey, % of respondents/);
+  const legend = app.element('macro-legend').innerHTML;
+  assert.match(legend, /key-bull[^>]*><\/i>Bullish [\d.]+% · Sep 16/);
+  assert.match(legend, /key-neutral[^>]*><\/i>Neutral [\d.]+%/);
+  assert.match(legend, /key-bear[^>]*><\/i>Bearish [\d.]+%/);
+  const table = app.element('macro-windows').innerHTML;
+  assert.match(table, /<th scope="col">Bullish average<\/th><th scope="col">Neutral average<\/th><th scope="col">Bearish average<\/th><th scope="col">Correlation of changes · AAII spread<\/th>/);
+  assert.match(table, /<tr class="current"><th scope="row">3 months<\/th><td class="up">\+[\d.]+%<\/td><td>[\d.]+%<\/td><td>[\d.]+%<\/td><td>[\d.]+%<\/td>/);
+  assert.match(app.element('macro-windows-note').textContent, /^The chart draws the three shares; the correlation uses the bull–bear spread/);
+});
+
+test('leverage cards underline the period their data covers', () => {
+  const card = {key: 'finra', status: 'ok', as_of: '2026-08-31', period: 'August 2026', reading: '$1.45T', signal: 'Rapid build-up', tone: 'high',
+                frequency: 'monthly', released: '2026-09-14', next: '2026-10-14', next_basis: 'estimated', lines: []};
+  const app = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards: [card], series: {}}});
+  assert.match(app.element('lever-cards').innerHTML, /<span class="data-date"><b>Data<\/b>August 2026 · monthly<\/span>/);
 });

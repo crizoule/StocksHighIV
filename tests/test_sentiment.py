@@ -249,6 +249,9 @@ class MacroTests(unittest.TestCase):
         self.assertEqual(len(spliced["points"]), 27)  # two replica points, then CNN's own 25
         self.assertEqual(spliced["source"], "CNN from 2026-08-01; replica from public data 2009-08-05 to then")
         self.assertEqual(s.chart_history({"cnn": long_cnn}, {})["series"]["fear_greed"]["source"], "CNN from 2026-08-01")
+        shares = {"bullish": [["2026-09-16", 28.8]], "neutral": [["2026-09-16", 17.9]], "bearish": [["2026-09-16", 53.3]]}
+        aaii = s.chart_history({}, {"aaii": [["2026-09-16", -24.5]], "aaii_shares": shares})["series"]["aaii"]
+        self.assertEqual((aaii["points"], aaii["lines"], aaii["unit"]), ([["2026-09-16", -24.5]], shares, "%"))  # spread kept for statistics
         sources = {"macro": {"vix": {"status": "ok", "value": 15.4, "as_of": "2026-09-17", "history": [["2026-09-17", 15.4]]},
                              "cnn": long_cnn, "fear_greed": replica}, "history": {"spx": {"points": [["2026-09-17", 7637.76]]}}}
         macro = evaluate(sources=sources)["macro_sentiment"]

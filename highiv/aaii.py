@@ -82,6 +82,21 @@ def spread_series(data_dir, *readings):
     return [[when.isoformat(), weeks[when]] for when in sorted(weeks)]
 
 
+SHARES = ("bullish", "neutral", "bearish")
+
+
+def share_series(data_dir, *readings):
+    """Bullish, neutral and bearish percentages by survey week, from the same sources and in the same order as the spread."""
+    weeks = {when - timedelta(days=1): v for when, v in bundled().items()}
+    for item in readings:
+        week = week_of(item or {})
+        values = [(item or {}).get(k) for k in SHARES]
+        if week and item.get("status") in ("ok", "cached") and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+            weeks[week] = values
+    weeks.update(entered_weeks(data_dir))
+    return {name: [[when.isoformat(), round(weeks[when][i], 2)] for when in sorted(weeks)] for i, name in enumerate(SHARES)}
+
+
 def entries_path(data_dir):
     return Path(data_dir) / "sentiment" / "aaii-manual.json"
 
@@ -139,9 +154,15 @@ def apply_entered(payload, data_dir):
         return payload
     chart = ((macro.get("history") or {}).get("series") or {}).get("aaii")
     if chart and isinstance(chart.get("points"), list):
+        weeks = entered_weeks(data_dir)
         points = {day: value for day, value in chart["points"]}
-        points.update({when.isoformat(): round(v[0] - v[2], 2) for when, v in entered_weeks(data_dir).items()})
+        points.update({when.isoformat(): round(v[0] - v[2], 2) for when, v in weeks.items()})
         chart["points"] = [[day, points[day]] for day in sorted(points)]
+        for i, name in enumerate(SHARES):  # reports saved before 2.9.0 carry the spread alone
+            if isinstance((chart.get("lines") or {}).get(name), list):
+                shares = {day: value for day, value in chart["lines"][name]}
+                shares.update({when.isoformat(): round(v[i], 2) for when, v in weeks.items()})
+                chart["lines"][name] = [[day, shares[day]] for day in sorted(shares)]
     for index, card in enumerate(macro.get("cards") or []):
         if card.get("key") == "aaii" and newest(card, reading) is reading:
             keep = {k: card[k] for k in ("key", "name", "url", "max_age") if k in card}

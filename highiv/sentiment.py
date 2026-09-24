@@ -776,6 +776,7 @@ def collect(rows, *, now=None):
                 progress.emit(activity=f"Sentiment sources checked: {i}/{len(jobs)}")
     result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
     result["history"]["aaii"] = aaii.spread_series(config.DATA_DIR, result["macro"]["aaii"])
+    result["history"]["aaii_shares"] = aaii.share_series(config.DATA_DIR, result["macro"]["aaii"])
     result["history"]["put_call"] = put_call_series((result["history"].get("put_call_archive") or {}).get("daily") or [])
     return result
 
@@ -822,7 +823,9 @@ def chart_history(macro, history):
     else:
         fear = dict(name="Fear & Greed replica", source="Replica from public data", points=replica)
     return {"spx": (history.get("spx") or {}).get("points") or [], "series": {
-        "aaii": dict(name="AAII bull–bear spread", unit=" pp", source="AAII weekly survey", frequency="weekly", points=history.get("aaii") or []),
+        # The three shares are drawn; the spread stays for the range statistics and correlation.
+        "aaii": dict(name="AAII bullish / neutral / bearish", unit="%", source="AAII weekly survey", frequency="weekly",
+                     points=history.get("aaii") or [], lines=history.get("aaii_shares") or {}),
         "vix": dict(name="VIX", unit="", source="Cboe", frequency="daily", points=(macro.get("vix") or {}).get("history") or []),
         "put_call": dict(name="Equity put/call, 5-day average", unit="", source="Cboe · archive 2003–2019 (ETF options included before June 2012), then daily statistics",
                          frequency="daily", points=history.get("put_call") or []),

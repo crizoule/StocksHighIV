@@ -183,7 +183,10 @@
       const replica = c.replica && isNum(c.replica.value) && sentimentFresh(c.replica.as_of, 4) ? c.replica : null;
       return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.reading || "—")}</div>` +
         `<span class="sentiment-badge ${tone}">${esc(stale ? "Stale · excluded" : c.usable ? c.signal : "Unavailable")}</span>` +
-        `<p class="sentiment-meta">${c.as_of ? `As of ${esc(c.as_of)}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? ` · ${esc(c.date_label || "week ending")}` : ""}</p>` +
+        // The observation date is underlined so a reading is never taken for today's.
+        `<p class="sentiment-meta data-date">${isoDate(String(c.as_of || "").slice(0, 10)) ? `As of ${esc(mediumDate.format(day(c.as_of.slice(0, 10))))}` : "Observation date unavailable"}${c.key === "aaii" && c.as_of ? ` · ${esc(c.date_label || "week ending")}` : ""}</p>` +
+        (c.key === "aaii" && [c.bullish, c.neutral, c.bearish].every(isNum)
+          ? `<p class="aaii-shares"><span class="bull">Bullish ${nf1.format(c.bullish)}%</span><span class="neutral">Neutral ${nf1.format(c.neutral)}%</span><span class="bear">Bearish ${nf1.format(c.bearish)}%</span></p>` : "") +
         (c.key === "aaii" ? aaiiRows(c) : "") +
         (c.replica_of ? `<p class="sentiment-meta">Not CNN's reading · CNN feed ${c.cnn_status === "stale" && c.cnn_as_of ? `stale since ${esc(c.cnn_as_of)}` : "unavailable"}</p>` : "") +
         (replica && c.usable ? `<p class="sentiment-meta">Replica ${nf1.format(replica.value)} · ${replica.value >= c.value ? "+" : "−"}${nf1.format(Math.abs(replica.value - c.value))} vs CNN</p>` : "") +
@@ -240,7 +243,7 @@
     $("lever-cards").innerHTML = cards.map(c => {
       const badge = !c.usable ? "unknown" : c.tone === "high" ? "elevated" : "";
       const covers = c.usable ? `${esc(c.period || mediumDate.format(day(c.as_of)))} · ${esc(CADENCE[c.frequency] || c.frequency || "")}` : "—";
-      const dates = c.usable ? `<div class="lever-dates"><span><b>Data</b>${covers}</span>` +
+      const dates = c.usable ? `<div class="lever-dates"><span class="data-date"><b>Data</b>${covers}</span>` +
         (c.frequency === "daily" ? "" : `<span><b>Released</b>${isoDate(c.released) ? esc(mediumDate.format(day(c.released))) : "Not recorded"}</span><span><b>Next</b>${nextRelease(c)}</span>`) +
         `</div>` : "";
       return `<article class="macro-card"><h3>${esc(c.name)}</h3><div class="macro-value">${esc(c.usable ? c.reading : "—")}</div>` +
@@ -264,7 +267,10 @@
   const gapOf = (series) => (GAP_DAYS[series.frequency] || 21) * 864e5;
   const signedFmt = (digits, unit) => (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(Math.abs(v))}${unit}`;
   const MACRO_SERIES = {
-    aaii: { short: "AAII spread", fmt: signedFmt(1, " pp"), ref: 0, refLabel: "line at 0: bulls = bears" },
+    aaii: { short: "AAII spread", fmt: signedFmt(1, " pp"), ref: 0, refLabel: "line at 0: bulls = bears",
+            // Drawn as the three shares; the spread stays for the table's statistics and correlation.
+            lines: [{ key: "bullish", label: "Bullish", cls: "bull" }, { key: "neutral", label: "Neutral", cls: "neutral" }, { key: "bearish", label: "Bearish", cls: "bear" }],
+            linesShort: "AAII survey, % of respondents", lineFmt: (v) => `${nf1.format(v)}%` },
     vix: { short: "VIX", fmt: (v) => nf2.format(v), ref: 20, refLabel: "line at 20" },
     put_call: { short: "Put/call", fmt: (v) => nf2.format(v), ref: null },
     fear_greed: { short: "Fear & Greed", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: neutral" },
@@ -349,7 +355,8 @@
       const spx = spxSource(), history = seriesSource();
       if (cache && cache.spxSource === spx && cache.history === history) return cache;
       const series = {};
-      for (const key of Object.keys(SERIES)) series[key] = { ...(history?.[key] || {}), points: datedPoints(history?.[key]?.points), signal: datedPoints(history?.[key]?.signal) };
+      for (const key of Object.keys(SERIES)) series[key] = { ...(history?.[key] || {}), points: datedPoints(history?.[key]?.points), signal: datedPoints(history?.[key]?.signal),
+        lines: Object.fromEntries((SERIES[key].lines || []).map((l) => [l.key, datedPoints(history?.[key]?.lines?.[l.key])])) };
       cache = { spxSource: spx, history, spx: datedPoints(spx), series };
       return cache;
     };
@@ -376,9 +383,14 @@
       const first = series.points[0];
       el("chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
       const latestPx = w.px[w.px.length - 1], latestInd = w.ind[w.ind.length - 1];
+      // Several lines share the lower pane when the series carries them (AAII's three shares); older reports hold one.
+      const multi = (meta.lines || []).map((l) => ({ ...l, points: (series.lines?.[l.key] || []).filter((p) => p.t >= start && p.t <= end), all: series.lines?.[l.key] || [] }))
+        .filter((l) => l.all.length);
+      const lastOf = (points) => points[points.length - 1];
       el("legend").innerHTML =
         `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
-        `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>` +
+        (multi.length ? multi.map((l) => `<span><i class="key key-${l.cls}" aria-hidden="true"></i>${esc(l.label)} ${l.points.length ? `${esc(meta.lineFmt(lastOf(l.points).v))} · ${esc(fmtDay(lastOf(l.points).d))}` : "—"}</span>`).join("")
+          : `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>`) +
         (meta.second && series.signal.length ? `<span><i class="key key-ind2" aria-hidden="true"></i>${esc(meta.second)} ${esc(meta.fmt(series.signal[series.signal.length - 1].v))}</span>` : "");
       const W = Math.max(240, el("plot").clientWidth || 960);
       const m = { left: 64, right: 14 }, top = 22, h1 = 186, gapY = 34, h2 = 104, axis = 22, H = top + h1 + gapY + h2 + axis;  // pane labels sit above each pane
@@ -399,7 +411,9 @@
       const second = meta.second ? series.signal.filter((p) => p.t >= start && p.t <= end) : [];
       const signalAt = new Map(second.map((p) => [p.t, p.v]));
       const bars = meta.histogram ? w.ind.filter((p) => signalAt.has(p.t)).map((p) => ({ t: p.t, v: p.v - signalAt.get(p.t) })) : [];
-      const P = pane(w.px, top, h1, null, log), I = w.ind.length ? pane(w.ind.concat(second, bars), top2, h2, meta.ref) : null;
+      const drawn = multi.flatMap((l) => l.points);
+      const P = pane(w.px, top, h1, null, log);
+      const I = multi.length ? (drawn.length ? pane(drawn, top2, h2, null) : null) : w.ind.length ? pane(w.ind.concat(second, bars), top2, h2, meta.ref) : null;
       const grid = (p, x1) => p.ticks.map((v) => `<line class="grid" x1="${m.left}" x2="${W - m.right}" y1="${p.y(v).toFixed(1)}" y2="${p.y(v).toFixed(1)}"/>` +
         `<text class="tick" x="${x1}" y="${(p.y(v) + 4).toFixed(1)}" text-anchor="end">${tickLabel(v, p.step)}</text>`).join("");
       // Date labels on calendar boundaries: (even) Januaries for multi-year ranges, quarters for a year,
@@ -431,38 +445,46 @@
           `y="${Math.min(y0, y1).toFixed(1)}" width="${barWidth.toFixed(2)}" height="${Math.max(Math.abs(y1 - y0), 0.5).toFixed(1)}"/>`;
       }).join("") : "";
       // Sparse series (weekly or slower) mark each observation while few enough fit, so releases read as points.
-      const markers = I && w.ind.length <= 60 && series.frequency && series.frequency !== "daily"
-        ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
+      const sparse = (points) => I && points.length <= 60 && series.frequency && series.frequency !== "daily";
+      const markers = multi.length
+        ? multi.map((l) => sparse(l.points) ? l.points.map((p) => `<circle class="dot-${l.cls}" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="3.5"/>`).join("") : "").join("")
+        : sparse(w.ind) ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
       el("plot").innerHTML =
         `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 ${phrase} above ${esc(name)} on the same dates">` +
         grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y, GAP_DAYS.daily * 864e5)}"/>` +
         `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${log ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
         (I ? grid(I, m.left - 8) +
           (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
-          histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y, gap)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y, gap)}"/>${markers}`
+          (multi.length ? multi.map((l) => `<path class="line-${l.cls}" d="${path(l.points, I.y, gap)}"/>`).join("") + markers
+            : histogram + (second.length ? `<path class="line-ind2" d="${path(second, I.y, gap)}"/>` : "") + `<path class="line-ind" d="${path(w.ind, I.y, gap)}"/>${markers}`)
           : `<text class="pane-empty" x="${(W + m.left) / 2}" y="${top2 + h2 / 2}" text-anchor="middle">No ${esc(name)} data in this range${first ? ` · history starts ${esc(fmtDay(first.d))}, ${first.d.slice(0, 4)}` : ""}</text>`) +
-        `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}${barPeriod ? ` · ${barPeriod}` : ""}</tspan>` : ""}</text>` +
+        (multi.length ? `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.linesShort)}</text>`
+          : `<text class="pane-label" x="${m.left}" y="${top2 - 9}">${esc(meta.short)}${I && meta.refLabel && W >= 460 ? `<tspan class="ref-label"> · ${esc(meta.refLabel)}${barPeriod ? ` · ${barPeriod}` : ""}</tspan>` : ""}</text>`) +
         labels.map((t) => `<text class="tick" x="${x(t).toFixed(1)}" y="${H - 6}" text-anchor="${anchor(t)}">${xFmt(t)}</text>`).join("") +
-        `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/><circle class="dot-ind" r="4"/></g>` +
+        `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/>` +
+        (multi.length ? multi.map((l) => `<circle class="dot-${l.cls}" data-line="${l.key}" r="4"/>`).join("") : `<circle class="dot-ind" r="4"/>`) + `</g>` +
         `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
-      hover = { x, P, I, w, start, end, name, meta, W, m };
+      hover = { x, P, I, w, start, end, name, meta, W, m, multi };
       const unit = FREQUENCY_NOUN[series.frequency] || "daily";
       const weeklyNote = unit === "daily" ? " Points older than 10 years are weekly, so long ranges mix weekly and daily changes." : "";
-      el("windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th><th scope="col">${esc(meta.short)} average</th>` +
-        `<th scope="col">${esc(meta.short)} low – high</th><th scope="col">Correlation of changes</th></tr></thead><tbody>` +
+      const columns = multi.length ? multi.map((l) => `<th scope="col">${esc(l.label)} average</th>`).join("")
+        : `<th scope="col">${esc(meta.short)} average</th><th scope="col">${esc(meta.short)} low – high</th>`;
+      el("windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th>${columns}` +
+        `<th scope="col">Correlation of changes${multi.length ? ` · ${esc(meta.short)}` : ""}</th></tr></thead><tbody>` +
         MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
-          const s = macroWindow(data.spx, series.points, monthsBack(end, y, mo), end, gap);
+          const from = monthsBack(end, y, mo), s = macroWindow(data.spx, series.points, from, end, gap);
+          const stats = multi.length ? multi.map((l) => { const a = macroWindow(data.spx, l.all, from, end, gap).avg; return `<td>${isNum(a) ? esc(meta.lineFmt(a)) : "—"}</td>`; }).join("")
+            : `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>`;
           return `<tr${key === state[keys.range] ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
-            `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` +
-            `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>` +
+            `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` + stats +
             `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
         }).join("") + "</tbody>";
-      el("windows-note").textContent = `Correlation compares each ${unit} change in ${name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
+      el("windows-note").textContent = `${multi.length ? `The chart draws the three shares; the correlation uses the bull–bear spread (bullish minus bearish). ` : ""}Correlation compares each ${unit} change in ${multi.length ? "the spread" : name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
     };
     const move = (ev) => {
       const svg = ev.target.closest(".macro-svg");
       if (!svg || !hover) return;
-      const { x, P, I, w, start, end, name, meta, W, m } = hover;
+      const { x, P, I, w, start, end, name, meta, W, m, multi } = hover;
       const box = svg.getBoundingClientRect();
       const t = start + ((ev.clientX - box.left) * (W / box.width) - m.left) / (W - m.left - m.right) * (end - start);
       const px = lastAtOrBefore(w.px, t) || w.px[0];
@@ -474,6 +496,18 @@
       hair.querySelector("line").setAttribute("x2", x(px.t).toFixed(1));
       const [dotPx, dotInd] = hair.querySelectorAll("circle");
       dotPx.setAttribute("cx", x(px.t).toFixed(1)); dotPx.setAttribute("cy", P.y(px.v).toFixed(1));
+      if (multi.length) {
+        const values = multi.map((l) => ({ l, p: I ? lastAtOrBefore(l.points, px.t) : null }));
+        for (const { l, p } of values) {
+          const dot = hair.querySelector(`[data-line="${l.key}"]`);
+          if (p) { dot.removeAttribute("hidden"); dot.setAttribute("cx", x(px.t).toFixed(1)); dot.setAttribute("cy", I.y(p.v).toFixed(1)); }
+          else dot.setAttribute("hidden", "");
+        }
+        const week = values.find((v) => v.p)?.p;
+        showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · AAII${week && week.d !== px.d ? ` (${fmtDay(week.d)})` : ""} ` +
+          values.map(({ l, p }) => `${l.label.toLowerCase()} ${p ? meta.lineFmt(p.v) : "—"}`).join(", "), ev.clientX, ev.clientY);
+        return;
+      }
       if (ind) { dotInd.removeAttribute("hidden"); dotInd.setAttribute("cx", x(px.t).toFixed(1)); dotInd.setAttribute("cy", I.y(ind.v).toFixed(1)); }
       else dotInd.setAttribute("hidden", "");
       showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
