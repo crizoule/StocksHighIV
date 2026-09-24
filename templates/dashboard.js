@@ -19,8 +19,8 @@
   const FRAME_WINDOW = { "1H": "1 wk", "4H": "1 mo", "1D": "6 mo", "1W": "2 yr", "1M": "5 yr" };
   const $ = (id) => document.getElementById(id);
 
-  const PAGES = ["scan", "sentiment", "leverage", "searches"];
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, lseries: "finra", lrange: "10Y", llog: false, page: "scan" };
+  const PAGES = ["scan", "sentiment", "leverage", "commodities", "searches"];
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, lseries: "finra", lrange: "10Y", llog: false, page: "scan", cseries: "cot", crange: "5Y", clog: false, commodity: null };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
@@ -32,12 +32,15 @@
     if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_flows", "etf_share", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.lrange)) state.lrange = saved.lrange;
     if (saved && PAGES.includes(saved.page)) state.page = saved.page;
+    if (saved && ["3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.crange)) state.crange = saved.crange;
+    if (saved && typeof saved.commodity === "string") state.commodity = saved.commodity;
+    if (saved) state.clog = saved.clog === true;
     if (saved) { state.mlog = saved.mlog === true; state.llog = saved.llog === true; }
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
       localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog,
-        lseries: state.lseries, lrange: state.lrange, llog: state.llog, page: state.page }));
+        lseries: state.lseries, lrange: state.lrange, llog: state.llog, page: state.page, crange: state.crange, clog: state.clog, commodity: state.commodity }));
     } catch (err) { /* ignore */ }
   };
 
@@ -445,8 +448,8 @@
     etf_share: { short: "Bull share of 3× assets", fmt: (v) => `${nf1.format(v)}%`, ref: 50, refLabel: "line at 50: as much in bull as bear funds" },
     etf_activity: { short: "3× ETF volume ÷ SPY + QQQ", fmt: (v) => `${nf1.format(v)}%`, ref: null },
   };
-  const monthsBack = (t, years, months) => {
-    if (years === undefined) return MACRO_EARLIEST;
+  const monthsBack = (t, years, months, earliest = MACRO_EARLIEST) => {
+    if (years === undefined) return earliest;
     const d = new Date(t); d.setUTCMonth(d.getUTCMonth() - months - 12 * years); return d.getTime();
   };
   const datedPoints = (pairs) => (Array.isArray(pairs) ? pairs : [])
@@ -505,8 +508,9 @@
   };
   const relation = (r) => !isNum(r) ? "—" : `${r >= 0 ? "+" : "−"}${nf2.format(Math.abs(r))} · ${Math.abs(r) < 0.2 ? "little relation" : r > 0 ? "moves with" : "moves against"}`;
   const FREQUENCY_NOUN = { daily: "daily", weekly: "weekly", monthly: "monthly", quarterly: "quarterly" };
-  /* One chart per panel: `id` prefixes its elements, `keys` names its state (series, range, log scale). */
-  const makeChart = ({ id, meta: SERIES, spx: spxSource, series: seriesSource, keys }) => {
+  /* One chart per panel: `id` prefixes its elements, `keys` names its state (series, range, log scale). The upper
+     pane is the S&P 500 unless `top` names another price (a commodity), with its own format and first date. */
+  const makeChart = ({ id, meta: SERIES, spx: spxSource, series: seriesSource, keys, top: topSource = () => ({}) }) => {
     const el = (part) => $(`${id}-${part}`);
     let cache = null, hover = null;
     const chartData = () => {
@@ -524,10 +528,11 @@
       document.querySelectorAll(`#${id}-range-seg button`).forEach((b) => { const on = b.dataset[keys.range] === state[keys.range]; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
       const data = chartData(), meta = SERIES[state[keys.series]], series = data.series[state[keys.series]];
       const name = renamed(series.name) || meta.short, gap = gapOf(series), log = state[keys.log];
+      const T = { name: "S&P 500", fmt: (v) => nf2.format(v), earliest: MACRO_EARLIEST, since: "1987", ...topSource() };
       hover = null;
       if (data.spx.length < 2) {
         el("legend").innerHTML = "";
-        el("plot").innerHTML = `<p class="macro-empty">S&amp;P 500 history appears after the next data refresh.</p>`;
+        el("plot").innerHTML = `<p class="macro-empty">${esc(T.name)} history appears after the next data refresh.</p>`;
         el("windows").innerHTML = "";
         el("chart-note").textContent = "";
         el("windows-note").textContent = "";
@@ -535,8 +540,8 @@
       }
       const end = data.spx[data.spx.length - 1].t;
       const [, label, years, months] = MACRO_RANGES.find(([key]) => key === state[keys.range]);
-      const phrase = years === undefined ? "since 1987" : `over ${label}`;
-      const start = monthsBack(end, years, months);
+      const phrase = years === undefined ? `since ${T.since}` : `over ${label}`;
+      const start = monthsBack(end, years, months, T.earliest);
       const w = macroWindow(data.spx, series.points, start, end, gap);
       const first = series.points[0];
       el("chart-note").textContent = ` · ${name} · ${series.source || ""}${first ? ` · since ${fmtDay(first.d)}, ${first.d.slice(0, 4)}` : ""}`;
@@ -546,7 +551,7 @@
         .filter((l) => l.all.length);
       const lastOf = (points) => points[points.length - 1];
       el("legend").innerHTML =
-        `<span><i class="key key-spx" aria-hidden="true"></i>S&amp;P 500 ${latestPx ? nf2.format(latestPx.v) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
+        `<span><i class="key key-spx" aria-hidden="true"></i>${esc(T.name)} ${latestPx ? esc(T.fmt(latestPx.v)) : "—"}${isNum(w.ret) ? ` · ${w.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(w.ret))}% ${phrase}` : ""}</span>` +
         (multi.length ? multi.map((l) => `<span><i class="key key-${l.cls}" aria-hidden="true"></i>${esc(l.label)} ${l.points.length ? `${esc(meta.lineFmt(lastOf(l.points).v))} · ${esc(fmtDay(lastOf(l.points).d))}` : "—"}</span>`).join("")
           : `<span><i class="key key-ind" aria-hidden="true"></i>${esc(name)} ${latestInd ? esc(meta.fmt(latestInd.v)) : "—"}${latestInd ? ` · ${esc(fmtDay(latestInd.d))}` : ""}</span>`) +
         (meta.second && series.signal.length ? `<span><i class="key key-ind2" aria-hidden="true"></i>${esc(meta.second)} ${esc(meta.fmt(series.signal[series.signal.length - 1].v))}</span>` : "");
@@ -608,9 +613,9 @@
         ? multi.map((l) => sparse(l.points) ? l.points.map((p) => `<circle class="dot-${l.cls}" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="3.5"/>`).join("") : "").join("")
         : sparse(w.ind) ? w.ind.map((p) => `<circle class="dot-ind" cx="${x(p.t).toFixed(1)}" cy="${I.y(p.v).toFixed(1)}" r="4"/>`).join("") : "";
       el("plot").innerHTML =
-        `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="S&amp;P 500 ${phrase} above ${esc(name)} on the same dates">` +
+        `<svg class="macro-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${esc(T.name)} ${phrase} above ${esc(name)} on the same dates">` +
         grid(P, m.left - 8) + `<path class="line-spx" d="${path(w.px, P.y, GAP_DAYS.daily * 864e5)}"/>` +
-        `<text class="pane-label" x="${m.left}" y="${top - 9}">S&amp;P 500${log ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
+        `<text class="pane-label" x="${m.left}" y="${top - 9}">${esc(T.name)}${log ? `<tspan class="ref-label"> · log scale</tspan>` : ""}</text>` +
         (I ? grid(I, m.left - 8) +
           (isNum(meta.ref) ? `<line class="ref" x1="${m.left}" x2="${W - m.right}" y1="${I.y(meta.ref).toFixed(1)}" y2="${I.y(meta.ref).toFixed(1)}"/>` : "") +
           (multi.length ? multi.map((l) => `<path class="line-${l.cls}" d="${path(l.points, I.y, gap)}"/>`).join("") + markers
@@ -622,27 +627,27 @@
         `<g class="xhair" hidden><line x1="0" x2="0" y1="${top}" y2="${top2 + h2}"/><circle class="dot-spx" r="4"/>` +
         (multi.length ? multi.map((l) => `<circle class="dot-${l.cls}" data-line="${l.key}" r="4"/>`).join("") : `<circle class="dot-ind" r="4"/>`) + `</g>` +
         `<rect class="hit" x="${m.left}" y="${top}" width="${W - m.left - m.right}" height="${top2 + h2 - top}"/></svg>`;
-      hover = { x, P, I, w, start, end, name, meta, W, m, multi };
+      hover = { x, P, I, w, start, end, name, meta, W, m, multi, T };
       const unit = FREQUENCY_NOUN[series.frequency] || "daily";
       const weeklyNote = unit === "daily" ? " Points older than 10 years are weekly, so long ranges mix weekly and daily changes." : "";
       const columns = multi.length ? multi.map((l) => `<th scope="col">${esc(l.label)} average</th>`).join("")
         : `<th scope="col">${esc(meta.short)} average</th><th scope="col">${esc(meta.short)} low – high</th>`;
-      el("windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">S&amp;P 500</th>${columns}` +
+      el("windows").innerHTML = `<thead><tr><th scope="col">Range</th><th scope="col">${esc(T.name)}</th>${columns}` +
         `<th scope="col">Correlation of changes${multi.length ? ` · ${esc(meta.short)}` : ""}</th></tr></thead><tbody>` +
         MACRO_RANGES.map(([key, rangeLabel, y, mo]) => {
-          const from = monthsBack(end, y, mo), s = macroWindow(data.spx, series.points, from, end, gap);
+          const from = monthsBack(end, y, mo, T.earliest), s = macroWindow(data.spx, series.points, from, end, gap);
           const stats = multi.length ? multi.map((l) => { const a = macroWindow(data.spx, l.all, from, end, gap).avg; return `<td>${isNum(a) ? esc(meta.lineFmt(a)) : "—"}</td>`; }).join("")
             : `<td>${isNum(s.avg) ? esc(meta.fmt(s.avg)) : "—"}</td><td>${isNum(s.lo) ? `${esc(meta.fmt(s.lo))} – ${esc(meta.fmt(s.hi))}` : "—"}</td>`;
-          return `<tr${key === state[keys.range] ? ' class="current"' : ""}><th scope="row">${rangeLabel}</th>` +
+          return `<tr${key === state[keys.range] ? ' class="current"' : ""}><th scope="row">${key === "MAX" ? `Since ${esc(T.since)}` : rangeLabel}</th>` +
             `<td class="${isNum(s.ret) ? (s.ret >= 0 ? "up" : "down") : ""}">${isNum(s.ret) ? `${s.ret >= 0 ? "+" : "−"}${nf1.format(Math.abs(s.ret))}%` : "—"}</td>` + stats +
             `<td>${esc(relation(s.r))}${s.n >= 8 ? ` <span class="sub">n=${nf0.format(s.n)}</span>` : ""}</td></tr>`;
         }).join("") + "</tbody>";
-      el("windows-note").textContent = `${multi.length ? `The chart draws the three shares; the correlation uses the bull–bear spread (bullish minus bearish). ` : ""}Correlation compares each ${unit} change in ${multi.length ? "the spread" : name} with the S&P 500's return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
+      el("windows-note").textContent = `${multi.length ? `The chart draws the three shares; the correlation uses the bull–bear spread (bullish minus bearish). ` : ""}Correlation compares each ${unit} change in ${multi.length ? "the spread" : name} with the ${T.name}'s return between the same dates: +1 moves together, −1 moves opposite, near 0 little relation. Changes across gaps in the data are left out.${weeklyNote} It describes the past, not a forecast; needs 8 changes.${meta.derived ? ` ${name} is calculated from the S&P 500's own closes, so this correlation reflects that arithmetic rather than a relationship between two sources.` : ""}`;
     };
     const move = (ev) => {
       const svg = ev.target.closest(".macro-svg");
       if (!svg || !hover) return;
-      const { x, P, I, w, start, end, name, meta, W, m, multi } = hover;
+      const { x, P, I, w, start, end, name, meta, W, m, multi, T } = hover;
       const box = svg.getBoundingClientRect();
       const t = start + ((ev.clientX - box.left) * (W / box.width) - m.left) / (W - m.left - m.right) * (end - start);
       const px = lastAtOrBefore(w.px, t) || w.px[0];
@@ -662,13 +667,13 @@
           else dot.setAttribute("hidden", "");
         }
         const week = values.find((v) => v.p)?.p;
-        showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · AAII${week && week.d !== px.d ? ` (${fmtDay(week.d)})` : ""} ` +
+        showTip(`${longDate.format(day(px.d))} · ${T.name} ${T.fmt(px.v)} · AAII${week && week.d !== px.d ? ` (${fmtDay(week.d)})` : ""} ` +
           values.map(({ l, p }) => `${l.label.toLowerCase()} ${p ? meta.lineFmt(p.v) : "—"}`).join(", "), ev.clientX, ev.clientY);
         return;
       }
       if (ind) { dotInd.removeAttribute("hidden"); dotInd.setAttribute("cx", x(px.t).toFixed(1)); dotInd.setAttribute("cy", I.y(ind.v).toFixed(1)); }
       else dotInd.setAttribute("hidden", "");
-      showTip(`${longDate.format(day(px.d))} · S&P 500 ${nf2.format(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
+      showTip(`${longDate.format(day(px.d))} · ${T.name} ${T.fmt(px.v)} · ${name} ${ind ? `${meta.fmt(ind.v)}${ind.d !== px.d ? ` (${fmtDay(ind.d)})` : ""}` : "—"}`, ev.clientX, ev.clientY);
     };
     const leave = () => { el("plot").querySelector?.(".xhair")?.setAttribute("hidden", ""); hideTip(); };
     return { render, move, leave };
@@ -679,6 +684,88 @@
   const leverChart = makeChart({ id: "lever", meta: LEVER_SERIES, spx: spxHistory, series: () => DATA.market_leverage?.series,
                                  keys: { series: "lseries", range: "lrange", log: "llog" } });
   const renderMacroChart = macroChart.render, renderLeverChart = leverChart.render;
+
+  /* ---------- commodities: each futures price above its CFTC positioning, grouped by category, most liquid first ---------- */
+  const COMMODITY_SERIES = { cot: { short: "Managed money net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat", second: "producers" } };
+  const nf3 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const priceFmt = (v) => !isNum(v) ? "—" : v < 10 ? nf3.format(v) : nf2.format(v);
+  const cmdtyMarkets = () => (DATA.commodities?.groups || []).flatMap((g) => g.markets || []);
+  const cmdtyMarket = () => { const all = cmdtyMarkets(); return all.find((m) => m.code === state.commodity) || all[0] || null; };
+  const cmdtySeries = new Map();  // one stable object per market, so the chart's cache sees the same history
+  const cmdtyHistory = (m) => {
+    if (!cmdtySeries.has(m.code)) cmdtySeries.set(m.code, { cot: { name: "Managed money net, % of open interest", frequency: "weekly",
+      source: "CFTC Disaggregated COT", points: m.managed_history || [], signal: m.producer_history || [] } });
+    return cmdtySeries.get(m.code);
+  };
+  const cmdtyChart = makeChart({ id: "cmdty", meta: COMMODITY_SERIES, spx: () => cmdtyMarket()?.price_history, keys: { series: "cseries", range: "crange", log: "clog" },
+    series: () => { const m = cmdtyMarket(); return m ? cmdtyHistory(m) : {}; },
+    top: () => {
+      const m = cmdtyMarket(), first = m?.price_history?.[0]?.[0];
+      return m ? { name: m.name, fmt: priceFmt, earliest: first ? day(first).getTime() : MACRO_EARLIEST, since: first ? first.slice(0, 4) : "the first report" } : {};
+    } });
+  const renderCmdtyChart = cmdtyChart.render;
+  const cmdtyTone = (index) => !isNum(index) ? "" : index >= 80 || index <= 20 ? "elevated" : "";
+  const cmdtySignal = (index) => !isNum(index) ? "No 3-year index yet" : index >= 80 ? "Speculators crowded long" : index <= 20 ? "Speculators crowded short" : "Typical positioning";
+  // A small two-pane chart per card: price above, managed money (blue) and producers (orange) below, over the chosen range.
+  const cmdtyMini = (m) => {
+    const price = datedPoints(m.price_history), managed = datedPoints(m.managed_history), producers = datedPoints(m.producer_history);
+    if (price.length < 2 && managed.length < 2) return '<p class="macro-note">No history yet</p>';
+    const end = Math.max(price.at(-1)?.t || 0, managed.at(-1)?.t || 0);
+    const [, , years, months] = MACRO_RANGES.find(([key]) => key === state.crange) || MACRO_RANGES[4];
+    const start = monthsBack(end, years, months, Math.min(price[0]?.t ?? end, managed[0]?.t ?? end));
+    const W = 300, x = (t) => 4 + (t - start) / Math.max(end - start, 1) * (W - 8);
+    const line = (points, y0, h, cls, extra = []) => {
+      const inRange = points.filter((p) => p.t >= start && p.t <= end);
+      if (inRange.length < 2) return { d: "", y: null };
+      const values = inRange.map((p) => p.v).concat(extra);
+      let lo = Math.min(...values), hi = Math.max(...values); if (lo === hi) { lo -= 1; hi += 1; }
+      const y = (v) => y0 + (1 - (v - lo) / (hi - lo)) * h;
+      return { d: `<path class="${cls}" d="${inRange.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("")}"/>`, y };
+    };
+    const px = line(price, 4, 62, "mini-price");
+    // Both position lines share one scale, which always includes zero.
+    const shared = managed.concat(producers).filter((p) => p.t >= start && p.t <= end).map((p) => p.v).concat([0]);
+    const scale = line(managed, 78, 38, "mini-managed", shared), prod = line(producers, 78, 38, "mini-producers", shared);
+    const zero = scale.y ? `<line class="mini-zero" x1="4" x2="${W - 4}" y1="${scale.y(0).toFixed(1)}" y2="${scale.y(0).toFixed(1)}"/>` : "";
+    return `<svg class="cmdty-mini" viewBox="0 0 ${W} 120" preserveAspectRatio="none" role="img" aria-label="${esc(m.name)} price above managed-money and producer net positions, ${esc(state.crange)}">` +
+      `${px.d}${zero}${prod.d}${scale.d}</svg>`;
+  };
+  const cmdtyCard = (m, selected) =>
+    `<article class="macro-card cmdty-card${selected ? " selected" : ""}" data-commodity="${esc(m.code)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="Show ${esc(m.name)} on the chart above">` +
+    `<h3>${esc(m.name)} <span class="cmdty-exch">${esc(m.exchange)} · ${esc(m.symbol)}</span></h3>` +
+    `<div class="macro-value">${esc(priceFmt(m.price))}</div>` +
+    `<p class="sentiment-meta">${[["1 month", m.change_1m], ["1 year", m.change_1y]].filter(([, v]) => isNum(v)).map(([k, v]) => `${k} <span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}${nf1.format(Math.abs(v))}%</span>`).join(" · ") || "Price change unavailable"}</p>` +
+    `<span class="sentiment-badge ${cmdtyTone(m.index)}">${esc(cmdtySignal(m.index))}</span>` +
+    `<p class="sentiment-meta cmdty-cot">Managed money <b>${isNum(m.managed_pct) ? esc(signedFmt(1, "%")(m.managed_pct)) : "—"}</b> of OI${isNum(m.index) ? ` · index ${nf0.format(m.index)}` : ""} · producers ${isNum(m.producers_pct) ? esc(signedFmt(1, "%")(m.producers_pct)) : "—"}</p>` +
+    cmdtyMini(m) +
+    `<p class="sentiment-meta data-date">${isoDate(m.as_of) ? `COT ${esc(mediumDate.format(day(m.as_of)))}` : "No COT report"}${isoDate(m.price_as_of) ? ` · price ${esc(mediumDate.format(day(m.price_as_of)))}` : ""}</p>` +
+    `<p class="sentiment-meta">Open interest ${isNum(m.open_interest) ? nf0.format(m.open_interest) : "—"} contracts</p></article>`;
+  const renderCommodities = () => {
+    const panel = DATA.commodities || {}, groups = panel.groups || [], markets = cmdtyMarkets(), chosen = cmdtyMarket();
+    const others = panel.contracts || [];
+    $("tab-label-commodities").textContent = markets.length ? `${markets.length} markets${isoDate(panel.as_of) ? ` · COT ${fmtDay(panel.as_of)}` : ""}` : "Awaiting data";
+    $("tab-label-commodities").className = "page-tab-label";
+    $("cmdty-note").innerHTML = markets.length
+      ? `<span class="data-date">CFTC positions as of ${esc(longDate.format(day(panel.as_of)))}</span>, released ${esc(isoDate(panel.released) ? longDate.format(day(panel.released)) : "—")}; ` +
+        `next report ${esc(isoDate(panel.next) ? longDate.format(day(panel.next)) : "—")}, ${esc(panel.next_time || "")}. Prices through ${esc(isoDate(panel.prices_as_of) ? mediumDate.format(day(panel.prices_as_of)) : "—")}. ` +
+        `${markets.length} markets charted in ${groups.length} categories, each ordered by open interest; ${nf0.format(others.length)} other contracts listed below. Select a card to chart it above.` +
+        (panel.cot_status === "cached" || panel.price_status === "cached" ? " Last good data retained; the latest refresh failed." : "")
+      : "Commodity prices and CFTC positions appear after the next data refresh.";
+    $("cmdty-groups").innerHTML = groups.map((g) => `<section class="cmdty-group" aria-label="${esc(g.name)}"><h3 class="cmdty-group-title">${esc(g.name)}` +
+      `<span>${nf0.format((g.markets || []).length)} markets · open interest ${compact(g.open_interest)}</span></h3>` +
+      `<div class="macro-grid cmdty-grid">${(g.markets || []).map((m) => cmdtyCard(m, chosen && m.code === chosen.code)).join("")}</div></section>`).join("");
+    const names = panel.categories || {};
+    const byCategory = new Map();
+    for (const c of others) { if (!byCategory.has(c.category)) byCategory.set(c.category, []); byCategory.get(c.category).push(c); }
+    const order = [...byCategory.keys()].sort((a, b) => byCategory.get(b).reduce((s, c) => s + c.open_interest, 0) - byCategory.get(a).reduce((s, c) => s + c.open_interest, 0));
+    $("cmdty-others-summary").textContent = `All ${nf0.format(others.length)} other commodity contracts in the COT report`;
+    $("cmdty-others").innerHTML = others.length ? `<table class="macro-windows cmdty-others-table"><thead><tr><th scope="col">Contract</th><th scope="col">Exchange</th><th scope="col">Open interest</th><th scope="col">Managed money net</th></tr></thead>` +
+      order.map((key) => `<tbody><tr class="cmdty-others-group"><th scope="rowgroup" colspan="4">${esc(names[key] || key)} · ${nf0.format(byCategory.get(key).length)}</th></tr>` +
+        byCategory.get(key).map((c) => `<tr><th scope="row">${esc(c.name)}</th><td>${esc(c.exchange)}</td><td>${nf0.format(c.open_interest)}</td>` +
+          `<td class="${c.managed_pct > 0 ? "up" : c.managed_pct < 0 ? "down" : ""}">${esc(signedFmt(1, "%")(c.managed_pct))}</td></tr>`).join("") + `</tbody>`).join("") + `</table>` : "";
+    $("cmdty-chart-title").textContent = chosen ? `${chosen.name} and positioning` : "Price and positioning";
+    renderCmdtyChart();
+  };
 
   /* ---------- views ---------- */
   const onTsx = (r) => r.market === "CA" || Boolean(r.also_listed);
@@ -1161,6 +1248,7 @@
     // A chart drawn while its tab was hidden had no width to measure; draw it again now it shows.
     if (state.page === "sentiment") renderMacroChart();
     if (state.page === "leverage") renderLeverChart();
+    if (state.page === "commodities") renderCmdtyChart();
   };
   const render = () => {
     renderPage();
@@ -1168,6 +1256,7 @@
     renderMacro();
     renderMacroSearch();
     renderLeverage();
+    renderCommodities();
     renderStatic();
     $("cap-panel").setAttribute("aria-labelledby", `cap-${state.cap}`);
     document.querySelectorAll("#cap-tabs button").forEach((b) => {
@@ -1366,6 +1455,19 @@
   wireSeg("lever-series-seg", "lseries", (v) => { state.lseries = v; persist(); }, "aria-checked", renderLeverChart);
   wireSeg("lever-range-seg", "lrange", (v) => { state.lrange = v; persist(); }, "aria-checked", renderLeverChart);
   $("lever-log").addEventListener("change", (ev) => { state.llog = ev.target.checked; persist(); renderLeverChart(); });
+  wireSeg("cmdty-range-seg", "crange", (v) => { state.crange = v; persist(); }, "aria-checked", renderCommodities);
+  $("cmdty-log").addEventListener("change", (ev) => { state.clog = ev.target.checked; persist(); renderCmdtyChart(); });
+  $("cmdty-plot").addEventListener("pointermove", cmdtyChart.move);
+  $("cmdty-plot").addEventListener("pointerleave", cmdtyChart.leave);
+  const chooseCommodity = (ev) => {
+    const card = ev.target.closest?.("[data-commodity]");
+    if (!card || (ev.type === "keydown" && ev.key !== "Enter" && ev.key !== " ")) return;
+    if (ev.type === "keydown") ev.preventDefault();
+    state.commodity = card.dataset.commodity; persist(); renderCommodities();
+    $("cmdty-chart").scrollIntoView?.({ behavior: "smooth", block: "start" });
+  };
+  $("cmdty-groups").addEventListener("click", chooseCommodity);
+  $("cmdty-groups").addEventListener("keydown", chooseCommodity);
   $("lever-plot").addEventListener("pointermove", leverChart.move);
   $("lever-plot").addEventListener("pointerleave", leverChart.leave);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });
@@ -1412,6 +1514,7 @@
   if ("ResizeObserver" in window) new ResizeObserver(() => drawDistribution(lastCutoff)).observe($("dist-frame"));
   if ("ResizeObserver" in window) new ResizeObserver(() => renderMacroChart()).observe($("macro-plot"));
   if ("ResizeObserver" in window) new ResizeObserver(() => renderLeverChart()).observe($("lever-plot"));
+  if ("ResizeObserver" in window) new ResizeObserver(() => renderCmdtyChart()).observe($("cmdty-plot"));
 
   $("macro-cards").addEventListener("click", (ev) => {
     const edit = ev.target.closest("[data-aaii-edit]");

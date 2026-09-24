@@ -42,7 +42,7 @@ The command-line examples below use Mac/Linux paths; on Windows replace `.venv/b
 
 ## Tabs and weighted labels
 
-The dashboard has four tabs: **IV scan** (the screen itself), **Sentiment**, **Leverage** and **Searches**. The dashboard remembers the open tab. Each context tab carries one label, shown on the tab and at the top of its page: **Bullish**, **Leaning bullish**, **Neutral**, **Mixed**, **Leaning bearish**, **Bearish** or **Insufficient data**, plus **historic high** or **historic low** when an input sits within 2 percentile points of either end of its own history.
+The dashboard has five tabs: **IV scan** (the screen itself), **Sentiment**, **Leverage**, **Commodities** and **Searches** (beta). The dashboard remembers the open tab. Sentiment, Leverage and Searches each carry one label, shown on the tab and at the top of its page: **Bullish**, **Leaning bullish**, **Neutral**, **Mixed**, **Leaning bearish**, **Bearish** or **Insufficient data**, plus **historic high** or **historic low** when an input sits within 2 percentile points of either end of its own history.
 
 Each input maps its reading onto −1 (bearish) to +1 (bullish) and has a base weight. Only fresh inputs count, and their weights are rescaled to 100%. A label needs at least three inputs and half the weight; otherwise it reads Insufficient data. The weighted score sets the band: +0.50 and above Bullish, +0.20 Leaning bullish, −0.20 Leaning bearish, −0.50 and below Bearish. Between −0.20 and +0.20 it reads Mixed when strong inputs (±0.50) pull both ways, and Neutral otherwise. **How this label is weighted**, under each label, lists every input with its reading, score, base weight, the share it actually counts for, and its rule. The labels are computed in the page, so a report saved by an older version shows them too.
 
@@ -108,7 +108,10 @@ python -m highiv sentiment
 
 This preserves the underlying market-data generation timestamp. It uses saved stock prices and fetches benchmarks; stale or mismatched stock dates require a normal data refresh before ranking resumes.
 
-## Macro search concerns
+## Macro search concerns (beta)
+
+This tab is marked **Beta**: Google Trends samples its data, often refuses automated requests, and can revise history between downloads, so readings are frequently missing or shift.
+
 
 The **Searches** tab, a separate US Google Trends panel, shows search attention for **recession, layoffs, inflation, bank failure, stock market crash, and war**. It never changes Fear & Greed, macro sentiment agreement, or stock sentiment scores. The **Recent · daily** view compares its latest seven complete days with the preceding 56 days in the same three-month download. At least 1.5× baseline is “Elevated”; at most 0.75× is “Below baseline”. The panel also shows change from the prior week and a chart of daily interest. These descriptive thresholds are not calibrated trading signals: searches measure attention, not opinion, and quiet searches do not imply optimism.
 
@@ -140,6 +143,25 @@ The **Leverage** tab shows how much investors are borrowing, from six free publi
 | Fed Financial Stability Report | Twice-yearly review; its section 3 covers leverage in the financial sector | [Federal Reserve](https://www.federalreserve.gov/publications/financial-stability-report.htm) · spring and fall | Six months on (estimated) |
 
 The chart below the cards works like the sentiment chart: the S&P 500 above, one leverage series below, the same ranges, log switch and correlation table. Monthly and quarterly series are drawn as connected points. A gap is only a break longer than the series' own step. The ETF card reads ProShares' daily files, which give each fund's NAV, shares outstanding and assets since launch. A fund's flow is its change in assets beyond its own NAV return, so gains, losses and reverse splits are not counted as money moving. Direxion's funds (SPXL, SOXL, TNA, TECL and their bear twins) are not included: Direxion publishes only today's shares outstanding, and its pages block automated access. It is a daily read of leveraged retail demand, not a measure of borrowing: nobody publishes retail leverage daily. FINRA refuses browser-like request headers, so these sources are fetched with a plain `StocksHighIV` user agent. The Z.1 ratio falls as the market grows faster than margin loans, so it can read low while FINRA's dollar total sets records.
+
+## Commodities
+
+The **Commodities** tab charts each main commodity futures market's price above its weekly positioning from the CFTC's [Disaggregated Commitments of Traders report](https://publicreporting.cftc.gov/) (futures only, since June 2006). Markets are grouped into Energy, Grains, Oilseeds, Softs, Metals, Livestock, Dairy and Lumber; categories and the markets within them are ordered by open interest, the report's measure of how much is held.
+
+| Category | Markets (CFTC contract · Yahoo continuous price) |
+|---|---|
+| Energy | WTI crude oil, natural gas (Henry Hub), RBOB gasoline, ULSD heating oil, Brent crude oil (NYMEX) |
+| Metals | Gold, silver, copper, steel hot-rolled coil (COMEX); platinum, palladium (NYMEX) |
+| Grains | Corn, wheat (soft red winter and hard red winter), rough rice (CBOT) |
+| Oilseeds | Soybeans, soybean meal, soybean oil (CBOT) |
+| Softs | Sugar No. 11, cotton No. 2, cocoa, coffee C, orange juice (ICE US) |
+| Livestock | Lean hogs, live cattle, feeder cattle (CME) |
+| Dairy | Class III milk, cheese, butter, nonfat dry milk (CME) |
+| Lumber | Lumber (CME, since 2023) |
+
+Each card shows the latest price with its 1-month and 1-year change, managed money's net position (hedge funds and commodity trading advisers, long minus short as a share of open interest), its three-year COT index (0 = least long, 100 = most long; 80 or above reads "crowded long", 20 or below "crowded short"), producers' and merchants' net position, and a small chart of price above both positions. Selecting a card puts that market on the full chart at the top, with the same ranges, log scale and correlation table as the other tabs. Positions are as of Tuesday and published Friday at 3:30 PM ET; the tab gives the report date, its release and the next one.
+
+Every other commodity contract in the report (about 240: regional natural-gas basis swaps and indices, electricity, emissions, propane, canola and others without a free continuous price) is listed below the charts by category, with open interest and managed money's net position. Prices are Yahoo's continuous front-month futures, weekly closes plus the latest close; a roll between contract months can show as a jump.
 
 ## Company logos
 

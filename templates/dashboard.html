@@ -21,7 +21,8 @@
     <button type="button" role="tab" id="tab-scan" data-page="scan" aria-selected="true" aria-controls="page-scan"><span class="page-tab-name">IV scan</span></button>
     <button type="button" role="tab" id="tab-sentiment" data-page="sentiment" aria-selected="false" aria-controls="page-sentiment" tabindex="-1"><span class="page-tab-name">Sentiment</span><span class="page-tab-label" id="tab-label-sentiment"></span></button>
     <button type="button" role="tab" id="tab-leverage" data-page="leverage" aria-selected="false" aria-controls="page-leverage" tabindex="-1"><span class="page-tab-name">Leverage</span><span class="page-tab-label" id="tab-label-leverage"></span></button>
-    <button type="button" role="tab" id="tab-searches" data-page="searches" aria-selected="false" aria-controls="page-searches" tabindex="-1"><span class="page-tab-name">Searches</span><span class="page-tab-label" id="tab-label-searches"></span></button>
+    <button type="button" role="tab" id="tab-commodities" data-page="commodities" aria-selected="false" aria-controls="page-commodities" tabindex="-1"><span class="page-tab-name">Commodities</span><span class="page-tab-label" id="tab-label-commodities"></span></button>
+    <button type="button" role="tab" id="tab-searches" data-page="searches" aria-selected="false" aria-controls="page-searches" tabindex="-1"><span class="page-tab-name">Searches <span class="beta-chip">Beta</span></span><span class="page-tab-label" id="tab-label-searches"></span></button>
   </nav>
 
   <div class="page-panel" id="page-scan" role="tabpanel" aria-labelledby="tab-scan">
@@ -228,12 +229,44 @@
     </section>
   </div>
 
+  <div class="page-panel" id="page-commodities" role="tabpanel" aria-labelledby="tab-commodities" hidden>
+    <section class="macro panel" aria-labelledby="cmdty-title">
+      <div class="macro-heading"><div><p class="eyebrow">Futures · CFTC positioning</p><h2 id="cmdty-title">Commodities</h2></div></div>
+      <p class="macro-note" id="cmdty-note"></p>
+      <figure class="macro-chart" id="cmdty-chart" aria-labelledby="cmdty-chart-title">
+        <figcaption class="macro-chart-head">
+          <div><span class="fig-title" id="cmdty-chart-title">Price and positioning</span><span class="fig-note" id="cmdty-chart-note"></span></div>
+          <div class="macro-chart-controls">
+            <div class="seg frames" id="cmdty-range-seg" role="radiogroup" aria-label="Time range">
+              <button type="button" role="radio" data-crange="3M" aria-checked="false" tabindex="-1">3M</button>
+              <button type="button" role="radio" data-crange="6M" aria-checked="false" tabindex="-1">6M</button>
+              <button type="button" role="radio" data-crange="1Y" aria-checked="false" tabindex="-1">1Y</button>
+              <button type="button" role="radio" data-crange="5Y" aria-checked="true">5Y</button>
+              <button type="button" role="radio" data-crange="10Y" aria-checked="false" tabindex="-1">10Y</button>
+              <button type="button" role="radio" data-crange="20Y" aria-checked="false" tabindex="-1">20Y</button>
+              <button type="button" role="radio" data-crange="MAX" aria-checked="false" tabindex="-1" title="Since the market's first price or report">Max</button>
+            </div>
+            <label class="switch" for="cmdty-log"><input type="checkbox" id="cmdty-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
+          </div>
+        </figcaption>
+        <div class="macro-legend" id="cmdty-legend"></div>
+        <div class="macro-plot" id="cmdty-plot"></div>
+        <div class="macro-windows-wrap"><table class="macro-windows" id="cmdty-windows"></table></div>
+        <p class="macro-note" id="cmdty-windows-note"></p>
+      </figure>
+      <div id="cmdty-groups"></div>
+      <details class="cmdty-others"><summary id="cmdty-others-summary">All other commodity contracts in the COT report</summary><div class="macro-windows-wrap" id="cmdty-others"></div></details>
+      <details class="sentiment-method"><summary>How to read these charts</summary><p>Each chart puts the futures price (Yahoo's continuous front-month contract, weekly closes) above the CFTC's weekly Commitments of Traders positions for the same market, from the Disaggregated report. The blue line is managed money (hedge funds and commodity trading advisers): long minus short contracts as a share of all open interest. The orange line is producers and merchants, the hedgers who grow, mine, process or use the commodity and usually take the other side. The COT index ranks managed money's net position within the last three years (0 = least long, 100 = most long); at 80 or above speculators are crowded long, at 20 or below crowded short, which traders often read as contrarian. Markets are grouped by category, and categories and markets are ordered by open interest, the report's measure of how much is held. Positions are as of Tuesday and published the following Friday at 3:30 PM ET. Contracts without a free continuous price, such as regional natural-gas basis swaps, electricity and emissions, are listed in the table below the charts.</p></details>
+    </section>
+  </div>
+
   <div class="page-panel" id="page-searches" role="tabpanel" aria-labelledby="tab-searches" hidden>
     <section class="macro panel" aria-labelledby="search-title">
-      <div class="macro-heading"><div><p class="eyebrow">Search attention · USA only</p><h2 id="search-title">Macro search concerns</h2></div></div>
+      <div class="macro-heading"><div><p class="eyebrow">Search attention · USA only</p><h2 id="search-title">Macro search concerns <span class="beta-chip">Beta</span></h2></div></div>
       <div class="verdict" id="verdict-searches" aria-live="polite"></div>
       <div id="search-body">
-        <div class="seg search-views" id="search-view-seg" role="group" aria-label="Search history view">
+        <p class="beta-note">Beta: Google Trends samples its data, often refuses automated requests, and can revise history between downloads, so readings are frequently missing or shift. Treat this tab as experimental.</p>
+      <div class="seg search-views" id="search-view-seg" role="group" aria-label="Search history view">
           <button type="button" data-search-view="recent" aria-pressed="true">Recent · daily</button>
           <button type="button" data-search-view="historical" aria-pressed="false">2004–present · monthly</button>
         </div>
