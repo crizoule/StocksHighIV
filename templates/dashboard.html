@@ -58,6 +58,19 @@
     </div>
   </section>
 
+  <section class="macro panel" aria-labelledby="search-title">
+    <div class="macro-heading"><div><p class="eyebrow">Search attention · USA only</p><h2 id="search-title"><button type="button" class="macro-toggle" id="search-toggle" aria-expanded="true" aria-controls="search-body"><span class="chevron" aria-hidden="true"></span>Macro search concerns</button></h2></div><span id="search-summary" class="sentiment-badge">Awaiting data</span></div>
+    <div id="search-body">
+      <div class="seg search-views" id="search-view-seg" role="group" aria-label="Search history view">
+        <button type="button" data-search-view="recent" aria-pressed="true">Recent · daily</button>
+        <button type="button" data-search-view="historical" aria-pressed="false">2004–present · monthly</button>
+      </div>
+      <p class="macro-note" id="search-note"></p>
+      <div class="macro-grid search-grid" id="search-cards"></div>
+      <details class="sentiment-method"><summary>What these searches tell us</summary><p>All six word searches use Google web searches from the USA only. They measure attention, not opinions or market direction. “War” can include entertainment and other non-geopolitical uses; this is a word search, not a topic classification.</p><p>Recent: the latest seven complete days are compared with the preceding 56 days within the same three-month download. At least 1.5× baseline is elevated; at most 0.75× is below baseline. Historical: the latest complete month is ranked against earlier complete months in the 2004–present download. The percentile is the share of earlier months below it, plus half of ties. At or above the 80th percentile is elevated. Each chart shows its actual available dates. Current partial months and days are excluded.</p><p>These are descriptive thresholds, not validated trading signals. Quiet searches do not imply optimism. Each download has its own relative 0–100 scale: raw values are never joined or compared across terms or views. Sparse data is excluded. Daily readings become stale after four days. Historical readings become stale if they omit the latest completed month or were fetched over 14 days ago. Recent data is collected at most daily and historical data weekly during a dashboard refresh, with a refresh due at the start of a new month. Google can revise sampled history; dated snapshots preserve what was retrieved. This panel remains separate from Fear &amp; Greed and stock sentiment scores.</p><a href="https://support.google.com/trends/answer/4365533?hl=en" target="_blank" rel="noopener noreferrer">About Google Trends data</a></details>
+    </div>
+  </section>
+
   <section class="macro panel" aria-labelledby="lever-title">
     <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="lever-title"><button type="button" class="macro-toggle" id="lever-toggle" aria-expanded="true" aria-controls="lever-body"><span class="chevron" aria-hidden="true"></span>Market leverage</button></h2></div><span id="lever-summary" class="sentiment-badge">Awaiting data</span></div>
     <p class="macro-oneline" id="lever-oneline" hidden></p>

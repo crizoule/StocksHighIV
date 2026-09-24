@@ -41,11 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The AAII chart now shows the survey's three answers as separate lines: bullish in green, neutral dashed grey, bearish in red, back to 1987. Hovering shows all three for a week, and the table below gives each one's average for every range. The correlation column still uses the bull–bear spread. The AAII card lists the three percentages under the spread, and a week you enter by hand appears on all three lines at once.
+    notes = '''Macro search concerns is a separate Google Trends panel covering six USA-only searches: recession, layoffs, inflation, bank failure, stock market crash, and war. These search-attention readings do not change Fear & Greed or stock sentiment scores.
 
-Every card in Macro sentiment and Market leverage now underlines the period its data covers, such as "As of Sep 17, 2026" or "Data August 2026 · monthly", so a weekly or monthly figure is not read as today's.
+Switch between recent daily history and monthly history requested from 2004 to the present. The recent view compares the latest complete week with the preceding eight weeks; the historical view ranks the latest complete month against earlier months in the same download. Partial periods are excluded, sparse data stays unclassified, and stale readings are labelled.
 
-Reports saved before this version keep the single spread line until their next data refresh.
+Collection uses trendspyg and requires Google Chrome. Requests are spaced and cached; rate limits pause collection for 24 hours while saved readings remain visible. New installations and historical backfills can show pending readings until subsequent refreshes succeed. Search attention is not a direct measure of sentiment, and broad terms such as war can include unrelated searches.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 

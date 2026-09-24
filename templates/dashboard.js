@@ -205,6 +205,52 @@
     renderMacroChart();
   };
 
+  /* ---------- macro search concerns: independent of sentiment scores ---------- */
+  const searchTerms = ["recession", "layoffs", "inflation", "bank failure", "stock market crash", "war"];
+  let searchView = "recent";
+  const searchChart = c => {
+    const historical = searchView === "historical";
+    const points = (c.points || []).filter(p => isoDate(p[0]) && isNum(p[1]) && p[1] >= 0 && p[1] <= 100);
+    if (points.length < 2) return '<p class="macro-note">History unavailable</p>';
+    const path = points.map((p, i) => `${i ? "L" : "M"}${(8 + i / (points.length - 1) * 224).toFixed(1)},${(66 - p[1] * .56).toFixed(1)}`).join(" ");
+    const label = p => historical ? p[0].slice(0, 4) : shortDate.format(day(p[0]));
+    return `<svg class="search-spark" viewBox="0 0 240 94" role="img" aria-label="${esc(c.term)} ${historical ? "monthly" : "daily"} USA search interest, ${esc(points[0][0])} to ${esc(points.at(-1)[0])}, relative scale 0 to 100">` +
+      `<text x="8" y="8">100</text><line x1="8" y1="66" x2="232" y2="66"/><path d="${path}"/><text x="8" y="79">0</text>` +
+      `<text x="8" y="92">${esc(label(points[0]))}</text><text x="232" y="92" text-anchor="end">${esc(label(points.at(-1)))}</text></svg>`;
+  };
+  const renderMacroSearch = () => {
+    const panel = DATA.macro_search || {}, historical = searchView === "historical";
+    const saved = historical ? panel.historical_cards : panel.cards;
+    const now = new Date(), lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10);
+    const cards = searchTerms.map(term => ({term, ...(saved || []).find(c => c.term === term)})).map(c => {
+      const fresh = c.status === "ok" && (historical ? c.as_of >= lastMonthEnd : sentimentFresh(c.as_of, 4)) && sentimentFresh(String(c.fetched_at || "").slice(0, 10), historical ? 14 : 4);
+      return {...c, fresh, usable: fresh && isNum(historical ? c.percentile : c.ratio)};
+    });
+    document.querySelectorAll("#search-view-seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.searchView === searchView)));
+    const usable = cards.filter(c => c.usable), elevated = usable.filter(c => historical ? c.percentile >= 80 : c.ratio >= 1.5);
+    $("search-summary").textContent = usable.length ? `${elevated.length}/${usable.length} elevated` : "Insufficient fresh data";
+    $("search-summary").className = `sentiment-badge${elevated.length ? " elevated" : ""}`;
+    const strongest = [...usable].sort((a, b) => historical ? b.percentile - a.percentile : b.ratio - a.ratio)[0];
+    $("search-note").textContent = `${usable.length}/${searchTerms.length} usable readings · USA only · ` +
+      (historical ? "Latest complete month ranked against earlier months in its full history. " : "Latest complete week vs preceding eight weeks. ") +
+      (strongest ? `Strongest relative interest: ${strongest.term}, ${historical ? `${nf1.format(strongest.percentile)} percentile` : `${nf2.format(strongest.ratio)}× its baseline`}. ` : "No usable readings for this view yet. ") +
+      "Separate from market sentiment." + (panel.error ? ` ${panel.error}` : "") +
+      (panel.paused_until && new Date(panel.paused_until) > now ? ` Google access is paused; collection can retry during a refresh after ${stamp.format(new Date(panel.paused_until))}. Saved readings remain visible.` : "");
+    $("search-cards").innerHTML = cards.map(c => {
+      const stale = c.as_of && !c.fresh;
+      const label = stale ? "Stale · excluded" : c.usable ? c.signal : c.status === "ok" ? "Limited data" : c.signal || "Awaiting data";
+      const movement = historical ? (c.history_start ? `Compared with earlier months since ${c.history_start.slice(0, 4)}` : "Full history requested from 2004") :
+        isNum(c.change_pct) ? `${c.change_pct > 0 ? "+" : ""}${nf1.format(c.change_pct)}% vs prior week` : "Weekly change unavailable";
+      const value = historical ? (isNum(c.percentile) ? `${nf1.format(c.percentile)}<span class="search-unit">percentile</span>` : "—") : (isNum(c.ratio) ? `${nf2.format(c.ratio)}×` : "—");
+      return `<article class="macro-card"><h3>${esc(c.term)}</h3><p class="macro-note">${esc(c.theme || "Search attention")}</p>` +
+        `<p class="macro-value">${value}</p><span class="sentiment-badge${c.usable && (historical ? c.percentile >= 80 : c.ratio >= 1.5) ? " elevated" : ""}">${esc(label)}</span>` +
+        `<p class="sentiment-meta">${esc(movement)}</p>${searchChart(c)}` +
+        `<p class="sentiment-meta">${isoDate(c.as_of) ? historical ? `Month: ${esc(monthYear.format(day(c.as_of)))}` : `Data through ${esc(mediumDate.format(day(c.as_of)))}` : "No observation date"}<br>${c.fetched_at ? esc(fetchedLabel(c.fetched_at)) : c.attempted_at ? esc(fetchedLabel(c.attempted_at).replace("Fetched", "Last attempt")) : "Not yet collected"}</p>` +
+        (c.error ? `<p class="macro-note">${esc(c.error)}</p>` : "") +
+        (c.url ? sentimentLink(c.url, "Open Google Trends · USA") : "") + `</article>`;
+    }).join("");
+  };
+
   /* ---------- market leverage: every card dated by its own release ---------- */
   const LEVER_CARDS = [
     {key: "finra", name: "Margin debt · FINRA", short: "Margin debt", url: "https://www.finra.org/rules-guidance/key-topics/margin-accounts/margin-statistics"},
@@ -995,6 +1041,7 @@
   const render = () => {
     U = (DATA.universe_by_cap && DATA.universe_by_cap[state.cap]) || DATA.universe;
     renderMacro();
+    renderMacroSearch();
     renderLeverage();
     renderStatic();
     $("cap-panel").setAttribute("aria-labelledby", `cap-${state.cap}`);
@@ -1182,6 +1229,17 @@
   wireSeg("macro-series-seg", "mseries", (v) => { state.mseries = v; persist(); }, "aria-checked", renderMacroChart);
   wireSeg("macro-range-seg", "mrange", (v) => { state.mrange = v; persist(); }, "aria-checked", renderMacroChart);
   $("macro-log").addEventListener("change", (ev) => { state.mlog = ev.target.checked; persist(); renderMacroChart(); });
+  $("search-view-seg").addEventListener("click", event => {
+    const button = event.target.closest("button[data-search-view]");
+    if (!button) return;
+    searchView = button.dataset.searchView;
+    renderMacroSearch();
+  });
+  $("search-toggle").addEventListener("click", () => {
+    const open = $("search-toggle").getAttribute("aria-expanded") !== "true";
+    $("search-toggle").setAttribute("aria-expanded", String(open));
+    $("search-body").hidden = !open;
+  });
   $("macro-toggle").addEventListener("click", () => { state.macroOpen = !state.macroOpen; persist(); renderMacro(); });
   $("macro-plot").addEventListener("pointermove", macroChart.move);
   $("macro-plot").addEventListener("pointerleave", macroChart.leave);

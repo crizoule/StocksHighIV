@@ -5,3 +5,4 @@ openpyxl>=3.1
 xlrd>=2.0.1
 tzdata>=2024.1
 Pillow>=11.0
+trendspyg==1.8.0

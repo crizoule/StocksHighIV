@@ -96,6 +96,24 @@ python -m highiv sentiment
 
 This preserves the underlying market-data generation timestamp. It uses saved stock prices and fetches benchmarks; stale or mismatched stock dates require a normal data refresh before ranking resumes.
 
+## Macro search concerns
+
+A separate US Google Trends panel shows search attention for **recession, layoffs, inflation, bank failure, stock market crash, and war**. It never changes Fear & Greed, macro sentiment agreement, or stock sentiment scores. The **Recent · daily** view compares its latest seven complete days with the preceding 56 days in the same three-month download. At least 1.5× baseline is “Elevated”; at most 0.75× is “Below baseline”. The panel also shows change from the prior week and a chart of daily interest. These descriptive thresholds are not calibrated trading signals: searches measure attention, not opinion, and quiet searches do not imply optimism.
+
+`trendspyg==1.8.0` is pinned because a small adapter validates Google's raw time-series response before the library can turn malformed values into zero. **Google Chrome must be installed**; Selenium downloads its matching driver on first use. The collector uses an isolated browser profile and stores only its own Google session cookies under `data/macro_search/`. It does not access your signed-in Chrome profile.
+
+The **2004–present · monthly** view downloads each term’s full history separately. It ranks the latest complete month against earlier complete months using the percentage below it plus half of ties; the 80th percentile or above is elevated. The current month is excluded even if Google omits its partial flag. Missing months and unexpected non-monthly resolution are rejected, not interpolated. All queries and provider links explicitly use **USA (`geo=US`)**. “War” is a word search and can include entertainment or other meanings.
+
+A completed dashboard build or sentiment refresh attempts each term/view at most once in 24 hours, with 20 seconds between requests and a four-minute total collection budget. Historical downloads are reused for seven days, with a new download due at a month boundary. Recent downloads are prioritized; unfinished historical requests resume on the next refresh. Preliminary builds use saved data. Collection runs only while the app is refreshing; it is not a separate background schedule. A rate limit, browser startup failure, or timeout pauses collection for 24 hours. Each request has a 75-second process timeout, including driver setup. Chrome failures do not prevent the rest of the dashboard from being written.
+
+Failed fetches preserve the last valid result, including its original observation and retrieval dates. Recent readings older than four days are visibly stale and excluded from the elevated count. Historical readings are stale after 14 days since retrieval or when they omit the latest completed month. Sparse series are marked “Limited data”; malformed data, missing daily observations, and partial periods cannot silently enter the comparison. Each series and timeframe has its own relative scale, so raw 0–100 values are never joined or compared across terms or views. Successful daily downloads are retained for 90 days in `data/macro_search/history/` to preserve what was observed at the time.
+
+To refresh only this panel on the saved dashboard, without an IV scan or refreshing other sentiment sources:
+
+```sh
+.venv/bin/python -m highiv macro-search
+```
+
 ## Market leverage
 
 A second panel below the sentiment panel shows how much investors are borrowing, from six free public sources. Each card shows the period its data covers, when that release came out, and when the next one is due. A due date marked **publisher's schedule** comes from the source itself. One marked **~ … estimated** follows the source's usual rhythm and can slip; once it passes without new data, the card says the release is due. The daily ETF card has no release calendar. Each reading is ranked against its own history, and the 80th percentile or above is marked elevated. The panel collapses to one line like the sentiment panel. It is refreshed with sentiment, including by `python -m highiv sentiment`.

@@ -16,7 +16,7 @@ from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from . import borrow, config, context, details, explain, iv, market, net, news, prices, store, progress, watchlist, logos, sentiment, leverage
+from . import borrow, config, context, details, explain, iv, market, net, news, prices, store, progress, watchlist, logos, sentiment, leverage, macro_search
 from .universe import norm_name
 
 log = partial(print, flush=True)
@@ -593,6 +593,7 @@ def build(run_date: str | None = None, *, cached_snapshot: dict | None = None, p
         payload["preliminary"] = {"remaining": preliminary, "checked": len(scans)}
     conn.close()
     leverage.enrich(payload, sentiment.enrich(payload))
+    macro_search.enrich(payload, refresh=not preliminary)
     progress.emit(phase="render", activity="Building both dashboard tabs")
     return write_outputs(payload)
 
@@ -626,5 +627,16 @@ def sentiment_latest() -> Path:
         raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
     payload = read_snapshot(snaps[-1])
     leverage.enrich(payload, sentiment.enrich(payload))
+    macro_search.enrich(payload)
     # Keep market-data generation timestamps intact; sentiment carries its own timestamps.
+    return write_outputs(payload)
+
+
+def macro_search_latest() -> Path:
+    """Refresh only search concerns, preserving all market data and sentiment scores."""
+    snaps = snapshots()
+    if not snaps:
+        raise SystemExit("No snapshot found. Run `python -m highiv build` first.")
+    payload = read_snapshot(snaps[-1])
+    macro_search.enrich(payload)
     return write_outputs(payload)
