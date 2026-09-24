@@ -526,7 +526,9 @@
       document.querySelectorAll(`#${id}-series-seg button`).forEach((b) => { const on = b.dataset[keys.series] === state[keys.series]; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
       el("log").checked = state[keys.log];
       document.querySelectorAll(`#${id}-range-seg button`).forEach((b) => { const on = b.dataset[keys.range] === state[keys.range]; b.setAttribute("aria-checked", String(on)); b.tabIndex = on ? 0 : -1; });
-      const data = chartData(), meta = SERIES[state[keys.series]], series = data.series[state[keys.series]];
+      const data = chartData(), series = data.series[state[keys.series]];
+      // A series can name its own pane and second line (a futures market's leading and second trader groups).
+      const meta = { ...SERIES[state[keys.series]], ...(series.short ? { short: series.short } : {}), ...(series.second_label ? { second: series.second_label } : {}) };
       const name = renamed(series.name) || meta.short, gap = gapOf(series), log = state[keys.log];
       const T = { name: "S&P 500", fmt: (v) => nf2.format(v), earliest: MACRO_EARLIEST, since: "1987", ...topSource() };
       hover = null;
@@ -685,16 +687,31 @@
                                  keys: { series: "lseries", range: "lrange", log: "llog" } });
   const renderMacroChart = macroChart.render, renderLeverChart = leverChart.render;
 
-  /* ---------- commodities: each futures price above its CFTC positioning, grouped by category, most liquid first ---------- */
-  const COMMODITY_SERIES = { cot: { short: "Managed money net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat", second: "producers" } };
+  /* ---------- futures: each price above its CFTC positioning; physical commodities, then financial futures ---------- */
+  // The leading trader group differs by market: managed money in commodities (producers hedge on the other side),
+  // asset managers in stock indices, Treasuries and crypto (leveraged funds' shorts there are mostly basis trades),
+  // leveraged funds in currencies, short-term rates and VIX. The data names both groups for each market.
+  const COMMODITY_SERIES = { cot: { short: "Net position", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat", second: "second group" } };
   const nf3 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
-  const priceFmt = (v) => !isNum(v) ? "—" : v < 10 ? nf3.format(v) : nf2.format(v);
-  const cmdtyMarkets = () => (DATA.commodities?.groups || []).flatMap((g) => g.markets || []);
+  const nf4 = new Intl.NumberFormat("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const priceFmt = (v) => !isNum(v) ? "—" : v < 0.1 ? String(v) : v < 10 ? (v < 2 ? nf4 : nf3).format(v) : nf2.format(v);
+  // Reports saved by 3.3.0 hold commodities only, under the older field names.
+  const cmdtySections = () => {
+    const panel = DATA.commodities || {};
+    if (panel.sections) return panel.sections;
+    if (!panel.groups) return [];
+    const legacy = (m) => ({ ...m, lead_name: "Managed money", second_name: "Producers", lead_pct: m.managed_pct, second_pct: m.producers_pct,
+                             lead_history: m.managed_history, second_history: m.producer_history });
+    return [{ key: "physical", name: "Physical commodities", as_of: panel.as_of, groups: panel.groups.map((g) => ({ ...g, markets: (g.markets || []).map(legacy) })),
+              contracts: (panel.contracts || []).map((c) => ({ ...c, spec_pct: c.managed_pct })) }];
+  };
+  const cmdtyMarkets = () => cmdtySections().flatMap((s) => (s.groups || []).flatMap((g) => g.markets || []));
   const cmdtyMarket = () => { const all = cmdtyMarkets(); return all.find((m) => m.code === state.commodity) || all[0] || null; };
   const cmdtySeries = new Map();  // one stable object per market, so the chart's cache sees the same history
   const cmdtyHistory = (m) => {
-    if (!cmdtySeries.has(m.code)) cmdtySeries.set(m.code, { cot: { name: "Managed money net, % of open interest", frequency: "weekly",
-      source: "CFTC Disaggregated COT", points: m.managed_history || [], signal: m.producer_history || [] } });
+    if (!cmdtySeries.has(m.code)) cmdtySeries.set(m.code, { cot: { name: `${m.lead_name} net, % of open interest`, short: `${m.lead_name} net`,
+      second_label: (m.second_name || "").toLowerCase(), frequency: "weekly", source: "CFTC Commitments of Traders",
+      points: m.lead_history || [], signal: m.second_history || [] } });
     return cmdtySeries.get(m.code);
   };
   const cmdtyChart = makeChart({ id: "cmdty", meta: COMMODITY_SERIES, spx: () => cmdtyMarket()?.price_history, keys: { series: "cseries", range: "crange", log: "clog" },
@@ -705,14 +722,22 @@
     } });
   const renderCmdtyChart = cmdtyChart.render;
   const cmdtyTone = (index) => !isNum(index) ? "" : index >= 80 || index <= 20 ? "elevated" : "";
-  const cmdtySignal = (index) => !isNum(index) ? "No 3-year index yet" : index >= 80 ? "Speculators crowded long" : index <= 20 ? "Speculators crowded short" : "Typical positioning";
-  // A small two-pane chart per card: price above, managed money (blue) and producers (orange) below, over the chosen range.
+  const cmdtySignal = (m) => {
+    if (!isNum(m.index)) return "No 3-year index yet";
+    if (m.index > 20 && m.index < 80) return "Typical positioning";
+    const long = m.index >= 80;
+    if (m.lead_name === "Asset managers") return long ? "Asset managers unusually long" : "Asset managers unusually light";
+    if (m.category === "volatility") return long ? "Speculators crowded long volatility" : "Speculators crowded short volatility";
+    return long ? "Speculators crowded long" : "Speculators crowded short";
+  };
+  const signedPct = (v) => isNum(v) ? signedFmt(1, "%")(v) : "—";
+  // A small two-pane chart per card: price above, the leading group (blue) and the second group (orange) below.
   const cmdtyMini = (m) => {
-    const price = datedPoints(m.price_history), managed = datedPoints(m.managed_history), producers = datedPoints(m.producer_history);
-    if (price.length < 2 && managed.length < 2) return '<p class="macro-note">No history yet</p>';
-    const end = Math.max(price.at(-1)?.t || 0, managed.at(-1)?.t || 0);
+    const price = datedPoints(m.price_history), lead = datedPoints(m.lead_history), second = datedPoints(m.second_history);
+    if (price.length < 2 && lead.length < 2) return '<p class="macro-note">No history yet</p>';
+    const end = Math.max(price.at(-1)?.t || 0, lead.at(-1)?.t || 0);
     const [, , years, months] = MACRO_RANGES.find(([key]) => key === state.crange) || MACRO_RANGES[4];
-    const start = monthsBack(end, years, months, Math.min(price[0]?.t ?? end, managed[0]?.t ?? end));
+    const start = monthsBack(end, years, months, Math.min(price[0]?.t ?? end, lead[0]?.t ?? end));
     const W = 300, x = (t) => 4 + (t - start) / Math.max(end - start, 1) * (W - 8);
     const line = (points, y0, h, cls, extra = []) => {
       const inRange = points.filter((p) => p.t >= start && p.t <= end);
@@ -724,45 +749,54 @@
     };
     const px = line(price, 4, 62, "mini-price");
     // Both position lines share one scale, which always includes zero.
-    const shared = managed.concat(producers).filter((p) => p.t >= start && p.t <= end).map((p) => p.v).concat([0]);
-    const scale = line(managed, 78, 38, "mini-managed", shared), prod = line(producers, 78, 38, "mini-producers", shared);
-    const zero = scale.y ? `<line class="mini-zero" x1="4" x2="${W - 4}" y1="${scale.y(0).toFixed(1)}" y2="${scale.y(0).toFixed(1)}"/>` : "";
-    return `<svg class="cmdty-mini" viewBox="0 0 ${W} 120" preserveAspectRatio="none" role="img" aria-label="${esc(m.name)} price above managed-money and producer net positions, ${esc(state.crange)}">` +
-      `${px.d}${zero}${prod.d}${scale.d}</svg>`;
+    const shared = lead.concat(second).filter((p) => p.t >= start && p.t <= end).map((p) => p.v).concat([0]);
+    const main = line(lead, 78, 38, "mini-managed", shared), other = line(second, 78, 38, "mini-second", shared);
+    const zero = main.y ? `<line class="mini-zero" x1="4" x2="${W - 4}" y1="${main.y(0).toFixed(1)}" y2="${main.y(0).toFixed(1)}"/>` : "";
+    return `<svg class="cmdty-mini" viewBox="0 0 ${W} 120" preserveAspectRatio="none" role="img" aria-label="${esc(m.name)} price above ${esc(m.lead_name)} and ${esc(m.second_name)} net positions, ${esc(state.crange)}">` +
+      `${px.d}${zero}${other.d}${main.d}</svg>`;
   };
   const cmdtyCard = (m, selected) =>
     `<article class="macro-card cmdty-card${selected ? " selected" : ""}" data-commodity="${esc(m.code)}" tabindex="0" role="button" aria-pressed="${selected}" aria-label="Show ${esc(m.name)} on the chart above">` +
     `<h3>${esc(m.name)} <span class="cmdty-exch">${esc(m.exchange)} · ${esc(m.symbol)}</span></h3>` +
     `<div class="macro-value">${esc(priceFmt(m.price))}</div>` +
     `<p class="sentiment-meta">${[["1 month", m.change_1m], ["1 year", m.change_1y]].filter(([, v]) => isNum(v)).map(([k, v]) => `${k} <span class="${v >= 0 ? "up" : "down"}">${v >= 0 ? "+" : "−"}${nf1.format(Math.abs(v))}%</span>`).join(" · ") || "Price change unavailable"}</p>` +
-    `<span class="sentiment-badge ${cmdtyTone(m.index)}">${esc(cmdtySignal(m.index))}</span>` +
-    `<p class="sentiment-meta cmdty-cot">Managed money <b>${isNum(m.managed_pct) ? esc(signedFmt(1, "%")(m.managed_pct)) : "—"}</b> of OI${isNum(m.index) ? ` · index ${nf0.format(m.index)}` : ""} · producers ${isNum(m.producers_pct) ? esc(signedFmt(1, "%")(m.producers_pct)) : "—"}</p>` +
+    `<span class="sentiment-badge ${cmdtyTone(m.index)}">${esc(cmdtySignal(m))}</span>` +
+    `<p class="sentiment-meta cmdty-cot"><i class="key key-ind" aria-hidden="true"></i>${esc(m.lead_name)} <b>${esc(signedPct(m.lead_pct))}</b> of OI${isNum(m.index) ? ` · index ${nf0.format(m.index)}` : ""} ` +
+    `· <i class="key key-ind2" aria-hidden="true"></i>${esc((m.second_name || "").toLowerCase())} ${esc(signedPct(m.second_pct))}</p>` +
     cmdtyMini(m) +
     `<p class="sentiment-meta data-date">${isoDate(m.as_of) ? `COT ${esc(mediumDate.format(day(m.as_of)))}` : "No COT report"}${isoDate(m.price_as_of) ? ` · price ${esc(mediumDate.format(day(m.price_as_of)))}` : ""}</p>` +
     `<p class="sentiment-meta">Open interest ${isNum(m.open_interest) ? nf0.format(m.open_interest) : "—"} contracts</p></article>`;
+  const cmdtyOthers = (section, names) => {
+    const others = section.contracts || [], byCategory = new Map();
+    if (!others.length) return "";
+    for (const c of others) { if (!byCategory.has(c.category)) byCategory.set(c.category, []); byCategory.get(c.category).push(c); }
+    const total = (key) => byCategory.get(key).reduce((s, c) => s + c.open_interest, 0);
+    const order = [...byCategory.keys()].sort((a, b) => total(b) - total(a));
+    const spec = section.key === "financial" ? "Leveraged funds net" : "Managed money net";
+    return `<details class="cmdty-others"><summary>All ${nf0.format(others.length)} other ${section.key === "financial" ? "financial" : "commodity"} contracts in the COT report</summary>` +
+      `<div class="macro-windows-wrap"><table class="macro-windows cmdty-others-table"><thead><tr><th scope="col">Contract</th><th scope="col">Exchange</th><th scope="col">Open interest</th><th scope="col">${spec}</th></tr></thead>` +
+      order.map((key) => `<tbody><tr class="cmdty-others-group"><th scope="rowgroup" colspan="4">${esc(names[key] || key)} · ${nf0.format(byCategory.get(key).length)}</th></tr>` +
+        byCategory.get(key).map((c) => `<tr><th scope="row">${esc(c.name)}</th><td>${esc(c.exchange)}</td><td>${nf0.format(c.open_interest)}</td>` +
+          `<td class="${c.spec_pct > 0 ? "up" : c.spec_pct < 0 ? "down" : ""}">${esc(signedPct(c.spec_pct))}</td></tr>`).join("") + `</tbody>`).join("") + `</table></div></details>`;
+  };
   const renderCommodities = () => {
-    const panel = DATA.commodities || {}, groups = panel.groups || [], markets = cmdtyMarkets(), chosen = cmdtyMarket();
-    const others = panel.contracts || [];
+    const panel = DATA.commodities || {}, sections = cmdtySections(), markets = cmdtyMarkets(), chosen = cmdtyMarket();
+    const others = sections.reduce((s, x) => s + (x.contracts || []).length, 0), categories = sections.reduce((s, x) => s + (x.groups || []).length, 0);
     $("tab-label-commodities").textContent = markets.length ? `${markets.length} markets${isoDate(panel.as_of) ? ` · COT ${fmtDay(panel.as_of)}` : ""}` : "Awaiting data";
     $("tab-label-commodities").className = "page-tab-label";
     $("cmdty-note").innerHTML = markets.length
       ? `<span class="data-date">CFTC positions as of ${esc(longDate.format(day(panel.as_of)))}</span>, released ${esc(isoDate(panel.released) ? longDate.format(day(panel.released)) : "—")}; ` +
         `next report ${esc(isoDate(panel.next) ? longDate.format(day(panel.next)) : "—")}, ${esc(panel.next_time || "")}. Prices through ${esc(isoDate(panel.prices_as_of) ? mediumDate.format(day(panel.prices_as_of)) : "—")}. ` +
-        `${markets.length} markets charted in ${groups.length} categories, each ordered by open interest; ${nf0.format(others.length)} other contracts listed below. Select a card to chart it above.` +
-        (panel.cot_status === "cached" || panel.price_status === "cached" ? " Last good data retained; the latest refresh failed." : "")
-      : "Commodity prices and CFTC positions appear after the next data refresh.";
-    $("cmdty-groups").innerHTML = groups.map((g) => `<section class="cmdty-group" aria-label="${esc(g.name)}"><h3 class="cmdty-group-title">${esc(g.name)}` +
-      `<span>${nf0.format((g.markets || []).length)} markets · open interest ${compact(g.open_interest)}</span></h3>` +
-      `<div class="macro-grid cmdty-grid">${(g.markets || []).map((m) => cmdtyCard(m, chosen && m.code === chosen.code)).join("")}</div></section>`).join("");
+        `${markets.length} markets charted in ${categories} categories, each ordered by open interest; ${nf0.format(others)} other contracts listed. Select a card to chart it above.` +
+        (sections.some((s) => s.status === "cached") || panel.price_status === "cached" || panel.cot_status === "cached" ? " Last good data retained; the latest refresh failed." : "")
+      : "Futures prices and CFTC positions appear after the next data refresh.";
     const names = panel.categories || {};
-    const byCategory = new Map();
-    for (const c of others) { if (!byCategory.has(c.category)) byCategory.set(c.category, []); byCategory.get(c.category).push(c); }
-    const order = [...byCategory.keys()].sort((a, b) => byCategory.get(b).reduce((s, c) => s + c.open_interest, 0) - byCategory.get(a).reduce((s, c) => s + c.open_interest, 0));
-    $("cmdty-others-summary").textContent = `All ${nf0.format(others.length)} other commodity contracts in the COT report`;
-    $("cmdty-others").innerHTML = others.length ? `<table class="macro-windows cmdty-others-table"><thead><tr><th scope="col">Contract</th><th scope="col">Exchange</th><th scope="col">Open interest</th><th scope="col">Managed money net</th></tr></thead>` +
-      order.map((key) => `<tbody><tr class="cmdty-others-group"><th scope="rowgroup" colspan="4">${esc(names[key] || key)} · ${nf0.format(byCategory.get(key).length)}</th></tr>` +
-        byCategory.get(key).map((c) => `<tr><th scope="row">${esc(c.name)}</th><td>${esc(c.exchange)}</td><td>${nf0.format(c.open_interest)}</td>` +
-          `<td class="${c.managed_pct > 0 ? "up" : c.managed_pct < 0 ? "down" : ""}">${esc(signedFmt(1, "%")(c.managed_pct))}</td></tr>`).join("") + `</tbody>`).join("") + `</table>` : "";
+    $("cmdty-groups").innerHTML = sections.map((section) => `<section class="cmdty-section" aria-label="${esc(section.name)}"><h3 class="cmdty-section-title">${esc(section.name)}</h3>` +
+      (section.groups || []).map((g) => `<section class="cmdty-group" aria-label="${esc(g.name)}"><h4 class="cmdty-group-title">${esc(g.name)}` +
+        `<span>${nf0.format((g.markets || []).length)} markets · open interest ${compact(g.open_interest)}</span></h4>` +
+        (g.reading ? `<p class="cmdty-reading">${esc(g.reading)}</p>` : "") +
+        `<div class="macro-grid cmdty-grid">${(g.markets || []).map((m) => cmdtyCard(m, chosen && m.code === chosen.code)).join("")}</div></section>`).join("") +
+      cmdtyOthers(section, names) + `</section>`).join("");
     $("cmdty-chart-title").textContent = chosen ? `${chosen.name} and positioning` : "Price and positioning";
     renderCmdtyChart();
   };

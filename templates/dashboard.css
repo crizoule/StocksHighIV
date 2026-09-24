@@ -665,6 +665,12 @@ th.col-stock { z-index: 2; }
   font: 700 10px var(--font-ui); letter-spacing: .06em; text-transform: uppercase; vertical-align: middle; }
 .beta-note { margin: 14px 0 10px; padding: 8px 12px; border-left: 3px solid var(--signal); background: var(--sev-elev-bg); color: var(--ink-2); font-size: 12px; line-height: 1.55; border-radius: 0 6px 6px 0; }
 /* Commodities: category sections of cards, each with a small price-over-positioning chart */
+.cmdty-section { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.cmdty-section-title { margin: 0; font-size: 19px; font-weight: 800; font-stretch: 110%; letter-spacing: -0.01em; }
+.cmdty-reading { margin: 6px 0 0; max-width: 110ch; color: var(--ink-2); font-size: 12px; line-height: 1.55; }
+.cmdty-cot .key { display: inline-block; width: 12px; margin-right: 4px; border-top: 2px solid; vertical-align: middle; }
+.cmdty-cot .key-ind { border-color: var(--accent); }
+.cmdty-cot .key-ind2 { border-color: var(--signal); }
 .cmdty-group { margin-top: 22px; }
 .cmdty-group-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 0; font-size: 16px; font-weight: 700; }
 .cmdty-group-title span { color: var(--ink-3); font: 500 12px var(--font-ui); }
@@ -681,7 +687,7 @@ th.col-stock { z-index: 2; }
 .cmdty-mini path { fill: none; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
 .cmdty-mini .mini-price { stroke: var(--ink-2); stroke-width: 1.5; }
 .cmdty-mini .mini-managed { stroke: var(--accent); stroke-width: 1.5; }
-.cmdty-mini .mini-producers { stroke: var(--signal); stroke-width: 1; opacity: .8; }
+.cmdty-mini .mini-second { stroke: var(--signal); stroke-width: 1; opacity: .8; }
 .cmdty-mini .mini-zero { stroke: var(--rule-strong); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .cmdty-others { margin-top: 22px; font-size: 12px; }
 .cmdty-others summary { cursor: pointer; color: var(--accent-ink); font-weight: 600; }

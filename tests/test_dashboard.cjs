@@ -669,58 +669,103 @@ test('search label: rising worry is bearish, quiet searches never reach Bullish'
   assert.match(box, /<th scope="row">“recession”<\/th><td>1.25× baseline · 90th pct since 2004<\/td><td class="down">−0.62<\/td><td>17%<\/td><td>17%<\/td>/);
 });
 
-test('commodities tab: categories most liquid first, each market charted with its positioning, every other contract listed', () => {
-  const weeks = [];
-  for (let t = Date.parse('2016-09-06T00:00:00Z'); t <= Date.parse('2026-09-15T00:00:00Z'); t += 7 * 864e5) weeks.push(new Date(t).toISOString().slice(0, 10));
-  const market = (code, name, symbol, oi, index, extra = {}) => ({code, name, exchange: 'NYMEX', symbol, open_interest: oi, index,
-    managed_pct: index / 5 - 10, producers_pct: 10 - index / 5, as_of: '2026-09-15', price: 95.13, price_as_of: '2026-09-24', change_1m: 15.5, change_1y: -4.2,
-    price_history: weeks.map((d, i) => [d, 50 + (i % 40)]), managed_history: weeks.map((d, i) => [d, (i % 30) - 10]),
-    producer_history: weeks.map((d, i) => [d, 10 - (i % 30)]), ...extra});
-  const commodities = {as_of: '2026-09-15', released: '2026-09-18', next: '2026-09-25', next_time: '3:30 PM ET', prices_as_of: '2026-09-24',
-    cot_status: 'ok', price_status: 'ok', categories: {energy: 'Energy', grains: 'Grains', electricity: 'Electricity'},
-    groups: [{key: 'energy', name: 'Energy', open_interest: 3775767, markets: [market('067651', 'WTI crude oil', 'CL=F', 1955764, 55),
-                                                                              market('023651', 'Natural gas (Henry Hub)', 'NG=F', 1820003, 12, {price: 3.321})]},
-             {key: 'grains', name: 'Grains', open_interest: 1843824, markets: [market('002602', 'Corn', 'ZC=F', 1843824, 100)]}],
-    contracts: [{code: 'X1', name: 'PJM WESTERN HUB', exchange: 'Nodal', category: 'electricity', open_interest: 900000, managed_pct: 0},
-                {code: 'X2', name: 'NAT GAS ICE LD1', exchange: 'ICE Energy', category: 'energy', open_interest: 7995976, managed_pct: 2.4}]};
+const cmdtyWeeks = [];
+for (let t = Date.parse('2016-09-06T00:00:00Z'); t <= Date.parse('2026-09-15T00:00:00Z'); t += 7 * 864e5) cmdtyWeeks.push(new Date(t).toISOString().slice(0, 10));
+const cmdtyMarket = (code, name, symbol, oi, index, extra = {}) => ({code, name, exchange: 'NYMEX', symbol, category: 'energy', open_interest: oi, index,
+  lead_name: 'Managed money', second_name: 'Producers', lead_pct: index / 5 - 10, second_pct: 10 - index / 5, as_of: '2026-09-15', price: 95.13,
+  price_as_of: '2026-09-24', change_1m: 15.5, change_1y: -4.2, price_history: cmdtyWeeks.map((d, i) => [d, 50 + (i % 40)]),
+  lead_history: cmdtyWeeks.map((d, i) => [d, (i % 30) - 10]), second_history: cmdtyWeeks.map((d, i) => [d, 10 - (i % 30)]), ...extra});
+
+test('futures tab: commodities then financial futures, each market led by the group that carries its direction', () => {
+  const financial = (code, name, symbol, oi, index, category, lead, second, extra = {}) =>
+    cmdtyMarket(code, name, symbol, oi, index, {exchange: 'CBOT', category, lead_name: lead, second_name: second, ...extra});
+  const commodities = {as_of: '2026-09-15', released: '2026-09-18', next: '2026-09-25', next_time: '3:30 PM ET', prices_as_of: '2026-09-24', price_status: 'ok',
+    categories: {energy: 'Energy', grains: 'Grains', electricity: 'Electricity', treasuries: 'Treasuries', currencies: 'Currencies', volatility: 'Volatility', crypto: 'Crypto'},
+    sections: [
+      {key: 'physical', name: 'Physical commodities', status: 'ok', as_of: '2026-09-15',
+       groups: [{key: 'energy', name: 'Energy', reading: 'Managed money leads; producers hedge.', open_interest: 3775767,
+                 markets: [cmdtyMarket('067651', 'WTI crude oil', 'CL=F', 1955764, 55), cmdtyMarket('023651', 'Natural gas (Henry Hub)', 'NG=F', 1820003, 12, {price: 3.321})]},
+                {key: 'grains', name: 'Grains', reading: '', open_interest: 1843824, markets: [cmdtyMarket('002602', 'Corn', 'ZC=F', 1843824, 100)]}],
+       contracts: [{code: 'X1', name: 'PJM WESTERN HUB', exchange: 'Nodal', category: 'electricity', open_interest: 900000, spec_pct: 0},
+                   {code: 'X2', name: 'NAT GAS ICE LD1', exchange: 'ICE Energy', category: 'energy', open_interest: 7995976, spec_pct: 2.4}]},
+      {key: 'financial', name: 'Financial futures', status: 'ok', as_of: '2026-09-15',
+       groups: [{key: 'treasuries', name: 'Treasuries', reading: 'Leveraged funds’ short is mostly the basis trade.', open_interest: 5377777,
+                 markets: [financial('043602', '10-year Treasury note', 'ZN=F', 5377777, 100, 'treasuries', 'Asset managers', 'Leveraged funds', {price: 104.61})]},
+                {key: 'currencies', name: 'Currencies', reading: '', open_interest: 542802,
+                 markets: [financial('097741', 'Japanese yen', '6J=F', 542802, 97, 'currencies', 'Leveraged funds', 'Asset managers', {price: 0.006335})]},
+                {key: 'volatility', name: 'Volatility', reading: '', open_interest: 446060,
+                 markets: [financial('1170E1', 'VIX futures', '^VIX', 446060, 5, 'volatility', 'Leveraged funds', 'Asset managers', {price: 15.67})]},
+                {key: 'crypto', name: 'Crypto', reading: '', open_interest: 20773,
+                 markets: [financial('133741', 'Bitcoin', 'BTC=F', 20773, 6, 'crypto', 'Asset managers', 'Leveraged funds', {price: 84370})]}],
+       contracts: [{code: 'Y1', name: 'NANO BITCOIN', exchange: 'Coinbase Derivatives', category: 'crypto', open_interest: 183449, spec_pct: -4.1}]}]};
   const app = renderEarnings(null, {}, {macro: {cards: []}, commodities, saved: {page: 'commodities'}});
   assert.equal(app.element('page-commodities').hidden, false);
-  assert.equal(app.element('tab-label-commodities').textContent, '3 markets · COT Sep 15');
+  assert.equal(app.element('tab-label-commodities').textContent, '7 markets · COT Sep 15');
   assert.match(app.element('cmdty-note').innerHTML, /<span class="data-date">CFTC positions as of Tue, Sep 15, 2026<\/span>, released Fri, Sep 18, 2026; next report Fri, Sep 25, 2026, 3:30 PM ET\./);
-  const groups = app.element('cmdty-groups').innerHTML;
-  assert.ok(groups.indexOf('WTI crude oil') < groups.indexOf('Natural gas') && groups.indexOf('Natural gas') < groups.indexOf('Corn'));
-  assert.match(groups, /<h3 class="cmdty-group-title">Energy<span>2 markets · open interest 3\.8M<\/span><\/h3>/);
-  assert.match(groups, /data-commodity="067651"[^>]*aria-pressed="true"/);  // the most liquid market is charted first
-  assert.match(groups, /<div class="macro-value">95.13<\/div>/);
-  assert.match(groups, /<div class="macro-value">3.321<\/div>/);  // small prices keep three decimals
-  assert.match(groups, /1 month <span class="up">\+15.5%<\/span> · 1 year <span class="down">−4.2%<\/span>/);
-  assert.match(groups, /<span class="sentiment-badge elevated">Speculators crowded short<\/span>/);  // natural gas, index 12
-  assert.match(groups, /<span class="sentiment-badge elevated">Speculators crowded long<\/span>/);  // corn, index 100
-  assert.match(groups, /Managed money <b>\+1.0%<\/b> of OI · index 55 · producers −1.0%/);
-  assert.match(groups, /class="cmdty-mini"[^>]*>.*class="mini-price" d="M.*class="mini-zero".*class="mini-producers" d="M.*class="mini-managed" d="M/);
-  assert.match(groups, /<p class="sentiment-meta data-date">COT Sep 15, 2026 · price Sep 24, 2026<\/p>/);
+  assert.match(app.element('cmdty-note').innerHTML, /7 markets charted in 6 categories, each ordered by open interest; 3 other contracts listed/);
+  const page = app.element('cmdty-groups').innerHTML;
+  const at = (text) => page.indexOf(text);
+  assert.ok(at('Physical commodities') < at('WTI crude oil') && at('WTI crude oil') < at('Natural gas') && at('Natural gas') < at('Corn') && at('Corn') < at('Financial futures'));
+  assert.match(page, /<h4 class="cmdty-group-title">Energy<span>2 markets · open interest 3\.8M<\/span><\/h4><p class="cmdty-reading">Managed money leads; producers hedge\.<\/p>/);
+  assert.match(page, /data-commodity="067651"[^>]*aria-pressed="true"/);  // the most liquid market is charted first
+  assert.match(page, /<div class="macro-value">95.13<\/div>/);
+  assert.match(page, /<div class="macro-value">3.321<\/div>/);  // small prices keep three decimals
+  assert.match(page, /<div class="macro-value">0.006335<\/div>/);  // yen futures keep their precision
+  assert.match(page, /1 month <span class="up">\+15.5%<\/span> · 1 year <span class="down">−4.2%<\/span>/);
+  assert.match(page, /key-ind" aria-hidden="true"><\/i>Managed money <b>\+1.0%<\/b> of OI · index 55 · <i class="key key-ind2" aria-hidden="true"><\/i>producers −1.0%/);
+  // The label follows the group that leads and, for VIX, what a long position means.
+  assert.match(page, /data-commodity="023651"[\s\S]*?Speculators crowded short/);
+  assert.match(page, /data-commodity="002602"[\s\S]*?Speculators crowded long/);
+  assert.match(page, /data-commodity="043602"[\s\S]*?Asset managers unusually long[\s\S]*?Asset managers <b>\+10.0%<\/b> of OI · index 100 · <i class="key key-ind2" aria-hidden="true"><\/i>leveraged funds −10.0%/);
+  assert.match(page, /data-commodity="097741"[\s\S]*?Speculators crowded long<\/span>/);
+  assert.match(page, /data-commodity="1170E1"[\s\S]*?Speculators crowded short volatility/);
+  assert.match(page, /data-commodity="133741"[\s\S]*?Asset managers unusually light/);
+  assert.match(page, /class="cmdty-mini"[^>]*>.*class="mini-price" d="M.*class="mini-zero".*class="mini-second" d="M.*class="mini-managed" d="M/);
+  assert.match(page, /<p class="sentiment-meta data-date">COT Sep 15, 2026 · price Sep 24, 2026<\/p>/);
+  // Every other contract, per section, by category and open interest, under the speculative group of its report.
+  assert.match(page, /<summary>All 2 other commodity contracts in the COT report<\/summary>.*<th scope="col">Managed money net<\/th>/);
+  assert.ok(at('Energy · 1') < at('Electricity · 1'));
+  assert.match(page, /<th scope="row">NAT GAS ICE LD1<\/th><td>ICE Energy<\/td><td>7,995,976<\/td><td class="up">\+2.4%<\/td>/);
+  assert.match(page, /<summary>All 1 other financial contracts in the COT report<\/summary>.*<th scope="col">Leveraged funds net<\/th>.*Crypto · 1.*NANO BITCOIN<\/th><td>Coinbase Derivatives<\/td><td>183,449<\/td><td class="down">−4.1%/);
+  // The chart names the market and its two groups.
   assert.match(app.element('cmdty-chart-title').textContent, /^WTI crude oil and positioning$/);
   assert.match(app.element('cmdty-legend').innerHTML, /key-spx[^>]*><\/i>WTI crude oil 53.00 · [+−][\d.]+% over 5 years/);
+  assert.match(app.element('cmdty-legend').innerHTML, /key-ind[^>]*><\/i>Managed money net, % of open interest [+−][\d.]+% · Sep 15/);
   assert.match(app.element('cmdty-legend').innerHTML, /key-ind2[^>]*><\/i>producers/);
   assert.match(app.element('cmdty-plot').innerHTML, /<text class="pane-label"[^>]*>WTI crude oil<\/text>/);
-  assert.match(app.element('cmdty-windows').innerHTML, /<th scope="col">WTI crude oil<\/th>/);
+  assert.match(app.element('cmdty-windows').innerHTML, /<th scope="col">WTI crude oil<\/th><th scope="col">Managed money net average<\/th>/);
   assert.match(app.element('cmdty-windows').innerHTML, /<th scope="row">Since 2016<\/th>/);
-  const others = app.element('cmdty-others').innerHTML;
-  assert.equal(app.element('cmdty-others-summary').textContent, 'All 2 other commodity contracts in the COT report');
-  assert.ok(others.indexOf('Energy · 1') < others.indexOf('Electricity · 1'));  // categories by open interest too
-  assert.match(others, /<th scope="row">NAT GAS ICE LD1<\/th><td>ICE Energy<\/td><td>7,995,976<\/td><td class="up">\+2.4%<\/td>/);
   // Selecting a card charts it and is remembered; Enter works as well as a click.
   const card = (code) => ({closest: (s) => s === '[data-commodity]' ? {dataset: {commodity: code}} : null});
-  app.element('cmdty-groups').handlers.click({type: 'click', target: card('002602')});
-  assert.equal(app.storage['ivl-view'].commodity, '002602');
-  assert.match(app.element('cmdty-chart-title').textContent, /^Corn and positioning$/);
-  assert.match(app.element('cmdty-groups').innerHTML, /data-commodity="002602"[^>]*aria-pressed="true"/);
-  app.element('cmdty-groups').handlers.keydown({type: 'keydown', key: 'Enter', preventDefault() {}, target: card('023651')});
-  assert.match(app.element('cmdty-chart-title').textContent, /^Natural gas \(Henry Hub\) and positioning$/);
+  app.element('cmdty-groups').handlers.click({type: 'click', target: card('043602')});
+  assert.equal(app.storage['ivl-view'].commodity, '043602');
+  assert.match(app.element('cmdty-chart-title').textContent, /^10-year Treasury note and positioning$/);
+  assert.match(app.element('cmdty-legend').innerHTML, /key-ind[^>]*><\/i>Asset managers net, % of open interest/);
+  assert.match(app.element('cmdty-legend').innerHTML, /key-ind2[^>]*><\/i>leveraged funds/);
+  assert.match(app.element('cmdty-plot').innerHTML, /Asset managers net<tspan class="ref-label"> · line at 0: net flat<\/tspan>/);
+  assert.match(app.element('cmdty-groups').innerHTML, /data-commodity="043602"[^>]*aria-pressed="true"/);
+  app.element('cmdty-groups').handlers.keydown({type: 'keydown', key: 'Enter', preventDefault() {}, target: card('097741')});
+  assert.match(app.element('cmdty-chart-title').textContent, /^Japanese yen and positioning$/);
   app.element('cmdty-groups').handlers.keydown({type: 'keydown', key: 'a', target: card('067651')});
-  assert.match(app.element('cmdty-chart-title').textContent, /^Natural gas/);  // other keys do nothing
+  assert.match(app.element('cmdty-chart-title').textContent, /^Japanese yen/);  // other keys do nothing
   const empty = renderEarnings(null, {}, {macro: {cards: []}});
   assert.equal(empty.element('tab-label-commodities').textContent, 'Awaiting data');
   assert.match(empty.element('cmdty-note').innerHTML, /appear after the next data refresh/);
   assert.match(empty.element('cmdty-plot').innerHTML, /history appears after the next data refresh/);
+});
+
+test('a report saved by 3.3.0 still shows its commodities under the older field names', () => {
+  const old = (code, name, oi, index) => ({code, name, exchange: 'NYMEX', symbol: 'CL=F', open_interest: oi, index, managed_pct: 5.4, producers_pct: 15.7,
+    as_of: '2026-09-15', price: 95.13, price_as_of: '2026-09-24', price_history: cmdtyWeeks.map((d, i) => [d, 50 + (i % 40)]),
+    managed_history: cmdtyWeeks.map((d, i) => [d, (i % 30) - 10]), producer_history: cmdtyWeeks.map((d, i) => [d, 10 - (i % 30)])});
+  const commodities = {as_of: '2026-09-15', released: '2026-09-18', next: '2026-09-25', prices_as_of: '2026-09-24', categories: {energy: 'Energy'},
+    groups: [{key: 'energy', name: 'Energy', open_interest: 1955764, markets: [old('067651', 'WTI crude oil', 1955764, 55)]}],
+    contracts: [{code: 'X2', name: 'NAT GAS ICE LD1', exchange: 'ICE Energy', category: 'energy', open_interest: 7995976, managed_pct: 2.4}]};
+  const app = renderEarnings(null, {}, {macro: {cards: []}, commodities, saved: {page: 'commodities'}});
+  const page = app.element('cmdty-groups').innerHTML;
+  assert.match(page, /<h3 class="cmdty-section-title">Physical commodities<\/h3>/);
+  assert.match(page, /Managed money <b>\+5.4%<\/b> of OI · index 55 · <i class="key key-ind2" aria-hidden="true"><\/i>producers \+15.7%/);
+  assert.match(page, /class="mini-managed" d="M/);
+  assert.match(page, /NAT GAS ICE LD1<\/th><td>ICE Energy<\/td><td>7,995,976<\/td><td class="up">\+2.4%<\/td>/);
+  assert.match(app.element('cmdty-legend').innerHTML, /key-ind2[^>]*><\/i>producers/);
 });
