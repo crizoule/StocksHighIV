@@ -41,11 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The dashboard now has four tabs: IV scan, Sentiment, Leverage and Searches, instead of three panels stacked above the scan. It reopens on the tab you last used.
+    notes = '''The Leverage tab now reads more leverage as more bullish, and leans on the data that updates daily. The label weighs ProShares' daily 3× fund data at 60%: net money into bull funds minus bear funds over 20 sessions (35%), and bull funds' share of those funds' assets (25%). FINRA's monthly margin debt carries 30%, and the slow quarterly and weekly sources 10% between them. A fund's flow counts only money moving in or out, not its gains, losses or reverse splits. Retail tends to add to bull funds on dips while a rally holds; when leveraged holders give up, bull funds' share of assets falls. Refresh your data once after updating to collect the new fund history.
 
-Each context tab carries one label, on the tab itself and at the top of its page: Bullish, Leaning bullish, Neutral, Mixed, Leaning bearish, Bearish or Insufficient data, plus "historic high" or "historic low" when an input is at an extreme of its own history. Every input is scored from −1 to +1 and weighted, missing or stale inputs are left out, and "How this label is weighted" shows each input's reading, score, weight and rule.
-
-Sentiment weighs VIX and the AAII survey most and Fear & Greed less, since it is partly built from VIX and put/call. Leverage ranks each measure against its own history, higher leverage reading more bearish. Searches treat rising worry as bearish, and quiet searches reach Leaning bullish at most, because low attention is not optimism. The labels work on reports saved by earlier versions too.
+Watchlist and Download schedule & notifications now open from the ☰ menu at the right of the app bar, and the bar itself is much thinner.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
