@@ -41,11 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Macro search concerns is a separate Google Trends panel covering six USA-only searches: recession, layoffs, inflation, bank failure, stock market crash, and war. These search-attention readings do not change Fear & Greed or stock sentiment scores.
+    notes = '''The AAII chart now shows its bullish, neutral and bearish lines straight after updating. Reports saved by 2.8.0 or earlier held only the bull–bear spread, and the app redraws a saved report with its saved data, so 2.9.0 kept showing the single spread line until a full data refresh. The three lines are now rebuilt from AAII's bundled history and the weeks you entered.
 
-Switch between recent daily history and monthly history requested from 2004 to the present. The recent view compares the latest complete week with the preceding eight weeks; the historical view ranks the latest complete month against earlier months in the same download. Partial periods are excluded, sparse data stays unclassified, and stale readings are labelled.
-
-Collection uses trendspyg and requires Google Chrome. Requests are spaced and cached; rate limits pause collection for 24 hours while saved readings remain visible. New installations and historical backfills can show pending readings until subsequent refreshes succeed. Search attention is not a direct measure of sentiment, and broad terms such as war can include unrelated searches.
+The put/call chart no longer has a hole from October 2019 to March 2022. The app stores Cboe's daily figures after its 2003–2019 archive, and it only filled older ones when the Fear & Greed replica was rebuilt, at most every six hours. On a new installation that left about 600 sessions missing for days. They now fill on every refresh, and until the gap closes the chart names how many sessions are still missing and between which dates.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
