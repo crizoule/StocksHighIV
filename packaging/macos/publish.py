@@ -41,9 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The AAII chart now shows its bullish, neutral and bearish lines straight after updating. Reports saved by 2.8.0 or earlier held only the bull–bear spread, and the app redraws a saved report with its saved data, so 2.9.0 kept showing the single spread line until a full data refresh. The three lines are now rebuilt from AAII's bundled history and the weeks you entered.
+    notes = '''The dashboard now has four tabs: IV scan, Sentiment, Leverage and Searches, instead of three panels stacked above the scan. It reopens on the tab you last used.
 
-The put/call chart no longer has a hole from October 2019 to March 2022. The app stores Cboe's daily figures after its 2003–2019 archive, and it only filled older ones when the Fear & Greed replica was rebuilt, at most every six hours. On a new installation that left about 600 sessions missing for days. They now fill on every refresh, and until the gap closes the chart names how many sessions are still missing and between which dates.
+Each context tab carries one label, on the tab itself and at the top of its page: Bullish, Leaning bullish, Neutral, Mixed, Leaning bearish, Bearish or Insufficient data, plus "historic high" or "historic low" when an input is at an extreme of its own history. Every input is scored from −1 to +1 and weighted, missing or stale inputs are left out, and "How this label is weighted" shows each input's reading, score, weight and rule.
+
+Sentiment weighs VIX and the AAII survey most and Fear & Greed less, since it is partly built from VIX and put/call. Leverage ranks each measure against its own history, higher leverage reading more bearish. Searches treat rising worry as bearish, and quiet searches reach Leaning bullish at most, because low attention is not optimism. The labels work on reports saved by earlier versions too.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
