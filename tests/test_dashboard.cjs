@@ -31,6 +31,7 @@ function renderEarnings(estimated, extra = {}, options = {}) {
     universe_by_cap: options.stats,
     macro_sentiment: options.macro,
     market_leverage: options.leverage,
+    macro_search: options.search,
     preliminary: options.preliminary,
   };
   const elements = new Map();
@@ -441,34 +442,22 @@ test('COT card shows leveraged funds and asset managers for the S&P 500 and VIX 
   assert.match(card, /Asset managers \+904,684 · index 34 · leveraged funds −293,143 · index 72 · dealers −702,938 · index 12/);
   assert.match(card, /VIX futures · asset managers −52,658 · index 1 · leveraged funds −16,504 · index 70/);
   assert.match(app.element('macro-note').textContent, /^1\/5 fresh readings/);
-  app.click('macro-toggle');
-  assert.match(app.element('macro-oneline').innerHTML, /<b>COT<\/b> \+48.4% of OI · Typical positioning/);
 });
 
-test('macro panel collapses to one line of readings, and the S&P 500 can use a log scale', () => {
+test('the S&P 500 can use a log scale, and reports saved before the rename keep the new card names', () => {
   const cards = [{key:'vix', value:14.81, reading:'14.81', status:'ok', as_of:'2026-09-18', max_age:4, signal:'Calm', direction:1},
     {key:'aaii', value:-24.5, reading:'-24.5 pp', status:'ok', as_of:'2026-08-01', max_age:10, signal:'Bearish tilt', direction:-1},
     {key:'cnn', name:'CNN Fear & Greed', value:28.6, reading:'28.6/100', status:'ok', as_of:'2026-09-18', max_age:2, signal:'Fear', direction:-1}];
   const spx = []; for (let y = 1990; y <= 2026; y++) spx.push([`${y}-01-03`, 300 * 1.1 ** (y - 1990)]);
   const history = {spx, series: {aaii: {points: []}, vix: {points: []}, put_call: {points: []}, fear_greed: {points: []}}};
-  const app = renderEarnings(null, {}, {macro: {cards, history}, saved: {macroOpen: false, mrange: 'MAX', mlog: true}});
-  assert.equal(app.element('macro-body').hidden, true);
-  assert.equal(app.element('macro-oneline').hidden, false);
-  assert.equal(app.element('macro-toggle').attributes['aria-expanded'], 'false');
-  const line = app.element('macro-oneline').innerHTML;
-  assert.match(line, /<b>VIX<\/b> 14.81 · Calm/);
-  assert.match(line, /<b>AAII<\/b> stale/);
-  assert.match(line, /<b>Put\/call<\/b> —/);
-  assert.match(line, /<b>Fear &amp; Greed<\/b> 28.6\/100 · Fear/);
+  const app = renderEarnings(null, {}, {macro: {cards, history}, saved: {mrange: 'MAX', mlog: true}});
   assert.match(app.element('macro-cards').innerHTML, /<h3>Fear &amp; Greed<\/h3>/);  // reports saved before the rename
   const ticks = [...app.element('macro-plot').innerHTML.matchAll(/class="tick" x="\d+" y="[\d.]+" text-anchor="end">([^<]+)</g)].map(m => m[1]);
   assert.deepEqual(ticks, ['500', '1,000', '2,000', '5,000', '10,000']);  // equal ratios, equal height
   assert.match(app.element('macro-plot').innerHTML, /S&amp;P 500<tspan class="ref-label"> · log scale<\/tspan>/);
   app.element('macro-log').handlers.change({target: {checked: false}});
   assert.doesNotMatch(app.element('macro-plot').innerHTML, /log scale/);
-  app.element('macro-toggle').handlers.click({});
-  assert.equal(app.element('macro-body').hidden, false);
-  assert.deepEqual([app.storage['ivl-view'].mlog, app.storage['ivl-view'].macroOpen], [false, true]);
+  assert.equal(app.storage['ivl-view'].mlog, false);
 });
 
 test('macro excludes stale data and retains source observation dates', () => {
@@ -476,7 +465,7 @@ test('macro excludes stale data and retains source observation dates', () => {
     {key:'vix', value:15, reading:'15.00', status:'ok', as_of:'2026-09-17', max_age:4, signal:'Calm', direction:1},
     {key:'aaii', value:-25, reading:'-25 pp', status:'ok', as_of:'2026-08-01', max_age:10, signal:'Bearish', direction:-1},
   ]}});
-  assert.equal(app.element('macro-summary').textContent, 'Limited coverage');
+  assert.equal(app.element('tab-label-sentiment').textContent, 'Insufficient data');  // one fresh input of five
   assert.match(app.element('macro-note').textContent, /1\/5 fresh readings/);
   assert.match(app.element('macro-cards').innerHTML, /Stale · excluded/);
   assert.match(app.element('macro-cards').innerHTML, /As of Aug 1, 2026/);
@@ -526,8 +515,7 @@ test('market leverage cards give each release date and the next one, and chart a
   assert.match(cards, /Last good reading retained; the latest refresh failed/);
   assert.match(cards, /<b>Data<\/b>Sep 17, 2026 · daily, after each close<\/span><\/div>/);  // daily: no release calendar
   assert.match(cards, /<li>12-month change \+37.2% · 89th percentile since 1998<\/li>/);
-  assert.equal(app.element('lever-summary').textContent, '2 of 5 measures elevated');
-  assert.match(app.element('lever-summary').className, /elevated/);
+  assert.equal(app.element('tab-label-leverage').textContent, 'Insufficient data');  // one charted series: too little to weigh
   assert.match(app.element('lever-note').textContent, /^6\/6 sources available/);
   const plot = app.element('lever-plot').innerHTML;
   assert.equal((plot.match(/class="line-ind" d="[^"]*/)[0].match(/M/g) || []).length, 1);  // quarterly steps are not gaps
@@ -538,11 +526,8 @@ test('market leverage cards give each release date and the next one, and chart a
   app.click('lever-series-seg', 'lseries', 'finra');
   assert.match(app.element('lever-plot').innerHTML, /No Margin debt, 12-month change data in this range/);
   assert.equal(app.storage['ivl-view'].lseries, 'finra');
-  app.element('lever-toggle').handlers.click();
-  assert.equal(app.element('lever-body').hidden, true);
-  assert.match(app.element('lever-oneline').innerHTML, /<b>Margin debt<\/b> \$1.45T · Rapid build-up/);
   const empty = renderEarnings(null, {}, {macro: {cards: []}});
-  assert.equal(empty.element('lever-summary').textContent, 'Limited coverage');
+  assert.equal(empty.element('tab-label-leverage').textContent, 'Insufficient data');
   assert.match(empty.element('lever-cards').innerHTML, /<h3>Hedge fund leverage · OFR<\/h3><div class="macro-value">—<\/div><span class="sentiment-badge unknown">Unavailable/);
 });
 
@@ -586,4 +571,88 @@ test('leverage cards underline the period their data covers', () => {
                 frequency: 'monthly', released: '2026-09-14', next: '2026-10-14', next_basis: 'estimated', lines: []};
   const app = renderEarnings(null, {}, {macro: {cards: []}, leverage: {cards: [card], series: {}}});
   assert.match(app.element('lever-cards').innerHTML, /<span class="data-date"><b>Data<\/b>August 2026 · monthly<\/span>/);
+});
+
+test('four page tabs: the IV scan first, each context tab remembered and labelled', () => {
+  const app = renderEarnings(null, {}, {macro: {cards: []}});
+  assert.equal(app.element('page-scan').hidden, false);
+  for (const page of ['sentiment', 'leverage', 'searches']) assert.equal(app.element(`page-${page}`).hidden, true);
+  assert.equal(app.element('tab-scan').attributes['aria-selected'], 'true');
+  app.click('page-tabs', 'page', 'leverage');
+  assert.equal(app.element('page-leverage').hidden, false);
+  assert.equal(app.element('page-scan').hidden, true);
+  assert.equal(app.element('tab-leverage').attributes['aria-selected'], 'true');
+  assert.equal(app.storage['ivl-view'].page, 'leverage');
+  const again = renderEarnings(null, {}, {macro: {cards: []}, saved: {page: 'searches'}});
+  assert.equal(again.element('page-searches').hidden, false);
+  assert.equal(again.element('tab-label-searches').textContent, 'Insufficient data');  // nothing collected: no guessed label
+  assert.match(again.element('tab-label-searches').className, /unknown/);
+  assert.equal(renderEarnings(null, {}, {saved: {page: 'nowhere'}}).element('page-scan').hidden, false);
+});
+
+test('sentiment label weighs its five inputs and flags a historic extreme', () => {
+  const card = (key, extra) => ({key, status: 'ok', as_of: '2026-09-17', max_age: 10, ...extra});
+  const cards = [card('vix', {value: 15, reading: '15.00'}), card('aaii', {value: -24.5, reading: '−24.5 pp'}),
+    card('cot', {value: 48.4, index: 72, reading: '+48.4% of OI'}), card('put_call', {value: 0.52, reading: '0.52 equity'}),
+    card('cnn', {value: 28.6, reading: '28.6/100'})];
+  const weeks = Array.from({length: 40}, (_, i) => [`2025-${String(1 + (i % 12)).padStart(2, '0')}-${String(1 + i % 27).padStart(2, '0')}`, -20 + i]);
+  const history = {spx: [], series: {aaii: {points: weeks}, vix: {points: weeks.map(([d], i) => [d, 10 + i])}}};
+  const app = renderEarnings(null, {}, {macro: {cards, history}});
+  // VIX +0.50, AAII −0.98, COT +0.44, put/call +0.72, Fear & Greed −0.54: they cancel, with strong inputs on both sides.
+  assert.equal(app.element('tab-label-sentiment').textContent, 'Mixed · historic low');
+  const box = app.element('verdict-sentiment').innerHTML;
+  assert.match(box, /<span class="verdict-label mixed">Mixed<\/span>/);
+  assert.match(box, /verdict-score">−0.00 <small>|verdict-score">\+0.00 <small>/);
+  assert.match(box, /100% of the weight has fresh data\./);
+  assert.match(box, /<strong>Historic low:<\/strong> AAII bull–bear spread is at the 0th percentile of its own history/);
+  assert.match(box, /<th scope="row">VIX<\/th><td>15.00<\/td><td class="up">\+0.50<\/td><td>25%<\/td><td>25%<\/td>/);
+  assert.match(box, /<th scope="row">AAII bull–bear spread<\/th><td>−24.5 pp<\/td><td class="down">−0.98<\/td>/);
+  const partial = renderEarnings(null, {}, {macro: {cards: [cards[0], cards[2], {...cards[3], as_of: '2026-08-01'}, cards[4]]}});
+  // put/call is stale and AAII missing: 60% of the weight, three inputs, rescaled.
+  assert.match(partial.element('verdict-sentiment').innerHTML, /60% of the weight has fresh data; missing inputs are left out and the rest rescaled/);
+  assert.match(partial.element('verdict-sentiment').innerHTML, /<th scope="row">VIX<\/th><td>15.00<\/td><td class="up">\+0.50<\/td><td>25%<\/td><td>42%<\/td>/);
+  assert.match(partial.element('verdict-sentiment').innerHTML, /<tr class="excluded"><th scope="row">Equity put\/call<\/th><td>No fresh reading<\/td><td class="">—<\/td><td>15%<\/td><td>excluded<\/td>/);
+  assert.equal(partial.element('tab-label-sentiment').textContent, 'Leaning bullish');  // (12.5 + 8.8 − 8.0) ÷ 60 = +0.22
+});
+
+test('leverage label reads high leverage as bearish and flags a historic high', () => {
+  const months = Array.from({length: 120}, (_, i) => { const d = new Date(Date.UTC(2016, 9 + i, 0)); return d.toISOString().slice(0, 10); });
+  const rising = months.map((d, i) => [d, i]);  // the latest point is the highest on record
+  const quarters = months.filter((_, i) => i % 3 === 2);
+  const series = {
+    finra: {unit: '%', points: rising}, z1: {unit: '%', points: quarters.map((d, i) => [d, 40 - i])},  // record low
+    ofr: {unit: '×', points: quarters.map((d, i) => [d, 2 + i / 100])}, ofr_gne: {unit: '×', points: quarters.map((d, i) => [d, 6 + i / 10])},
+    cot_lev: {unit: '%', points: months.map((d, i) => [d, i % 2 ? 5 : -5])},
+    etf_bull: {unit: '%', points: rising.map(([d, v]) => [d, 50 + (v % 20)])}, etf_activity: {unit: '%', points: rising},
+  };
+  const card = (key, frequency, extra = {}) => ({key, status: 'ok', as_of: months.at(-1), frequency, ...extra});
+  const leverage = {cards: [card('finra', 'monthly'), card('z1', 'quarterly'), card('ofr', 'quarterly'), card('cot', 'weekly'),
+                            card('etf', 'daily', {status: 'unavailable'}), card('fsr', 'semiannual')], series};
+  const app = renderEarnings(null, {}, {macro: {cards: []}, leverage});
+  // (−0.99 × 25 + 0.98 × 15 − 0.98 × 15 − 0.98 × 10 − 0.50 × 10) ÷ 75 = −0.53; ETFs unavailable.
+  assert.equal(app.element('tab-label-leverage').textContent, 'Bearish · historic high');
+  const box = app.element('verdict-leverage').innerHTML;
+  assert.match(box, /75% of the weight has fresh data/);
+  assert.match(box, /<strong>Historic high:<\/strong> Margin debt, 12-month change \(FINRA\) is at the 100th percentile/);
+  assert.match(box, /<th scope="row">Margin debt, 12-month change \(FINRA\)<\/th><td>\+119.0% · 100th pct<\/td><td class="down">−0.99<\/td><td>25%<\/td><td>33%<\/td>/);
+  assert.match(box, /<th scope="row">Margin loans ÷ stock market value \(Fed Z.1\)<\/th><td>1.0% · 1st pct<\/td><td class="up">\+0.98<\/td>/);
+  assert.match(box, /<th scope="row">3× ETF volume vs SPY \+ QQQ<\/th><td>Unavailable<\/td><td class="">—<\/td><td>15%<\/td><td>excluded<\/td>/);
+  assert.match(box, /either extreme = −1/);
+  const stale = renderEarnings(null, {}, {macro: {cards: []}, leverage: {...leverage, series: {...series,
+    finra: {unit: '%', points: rising.map(([d, v], i) => [months[i - 6] || d, v]).slice(0, -6)}}}});
+  assert.match(stale.element('verdict-leverage').innerHTML, /<th scope="row">Margin debt, 12-month change \(FINRA\)<\/th><td>Stale<\/td>/);  // over 75 days old
+});
+
+test('search label: rising worry is bearish, quiet searches never reach Bullish', () => {
+  const terms = ['recession', 'layoffs', 'inflation', 'bank failure', 'stock market crash', 'war'];
+  const recent = (ratio) => terms.map(term => ({term, status: 'ok', as_of: '2026-09-17', fetched_at: '2026-09-18T12:00:00Z', ratio}));
+  const monthly = (percentile) => terms.map(term => ({term, status: 'ok', as_of: '2026-08-31', fetched_at: '2026-09-18T12:00:00Z', percentile}));
+  const label = (search) => renderEarnings(null, {}, {macro: {cards: []}, search}).element('tab-label-searches').textContent;
+  assert.equal(label({cards: recent(0.3), historical_cards: monthly(1)}), 'Leaning bullish · historic low');  // capped at +0.4
+  assert.equal(label({cards: recent(2), historical_cards: monthly(99)}), 'Bearish · historic high');
+  assert.equal(label({cards: recent(1), historical_cards: monthly(50)}), 'Neutral');
+  assert.equal(label({cards: recent(1.2)}), 'Leaning bearish');  // −0.40: the weekly view alone stands in for both
+  const box = renderEarnings(null, {}, {macro: {cards: []}, search: {cards: recent(1.25), historical_cards: monthly(90)}}).element('verdict-searches').innerHTML;
+  // 0.6 × −0.50 + 0.4 × −0.80 = −0.62 for every term
+  assert.match(box, /<th scope="row">“recession”<\/th><td>1.25× baseline · 90th pct since 2004<\/td><td class="down">−0.62<\/td><td>17%<\/td><td>17%<\/td>/);
 });

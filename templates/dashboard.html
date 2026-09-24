@@ -17,215 +17,231 @@
     <dl class="session" id="session"></dl>
   </header>
 
-  <section class="macro panel" aria-labelledby="macro-title">
-    <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title"><button type="button" class="macro-toggle" id="macro-toggle" aria-expanded="true" aria-controls="macro-body"><span class="chevron" aria-hidden="true"></span>Macro sentiment</button></h2></div><span id="macro-summary" class="sentiment-badge">Awaiting data</span></div>
-    <p class="macro-oneline" id="macro-oneline" hidden></p>
-    <div id="macro-body">
-    <p class="macro-note" id="macro-note"></p>
-    <div class="macro-grid" id="macro-cards"></div>
-    <figure class="macro-chart" aria-labelledby="macro-chart-title">
-      <figcaption class="macro-chart-head">
-        <div><span class="fig-title" id="macro-chart-title">S&amp;P 500 and sentiment</span><span class="fig-note" id="macro-chart-note"></span></div>
-        <div class="macro-chart-controls">
-          <div class="seg" id="macro-series-seg" role="radiogroup" aria-label="Sentiment series">
-            <button type="button" role="radio" data-mseries="aaii" aria-checked="true">AAII</button>
-            <button type="button" role="radio" data-mseries="vix" aria-checked="false" tabindex="-1">VIX</button>
-            <button type="button" role="radio" data-mseries="put_call" aria-checked="false" tabindex="-1">Put/call</button>
-            <button type="button" role="radio" data-mseries="fear_greed" aria-checked="false" tabindex="-1">Fear &amp; Greed</button>
-            <button type="button" role="radio" data-mseries="cot" aria-checked="false" tabindex="-1">COT</button>
-            <button type="button" role="radio" data-mseries="rsi" aria-checked="false" tabindex="-1">RSI</button>
-            <button type="button" role="radio" data-mseries="macd" aria-checked="false" tabindex="-1">MACD</button>
-          </div>
-          <div class="seg frames" id="macro-range-seg" role="radiogroup" aria-label="Time range">
-            <button type="button" role="radio" data-mrange="1M" aria-checked="false" tabindex="-1">1M</button>
-            <button type="button" role="radio" data-mrange="3M" aria-checked="false" tabindex="-1">3M</button>
-            <button type="button" role="radio" data-mrange="6M" aria-checked="false" tabindex="-1">6M</button>
-            <button type="button" role="radio" data-mrange="1Y" aria-checked="true">1Y</button>
-            <button type="button" role="radio" data-mrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
-            <button type="button" role="radio" data-mrange="10Y" aria-checked="false" tabindex="-1">10Y</button>
-            <button type="button" role="radio" data-mrange="20Y" aria-checked="false" tabindex="-1">20Y</button>
-            <button type="button" role="radio" data-mrange="MAX" aria-checked="false" tabindex="-1" title="Since July 1987, when AAII's survey begins">Max</button>
-          </div>
-          <label class="switch" for="macro-log"><input type="checkbox" id="macro-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
-        </div>
-      </figcaption>
-      <div class="macro-legend" id="macro-legend"></div>
-      <div class="macro-plot" id="macro-plot"></div>
-      <div class="macro-windows-wrap"><table class="macro-windows" id="macro-windows"></table></div>
-      <p class="macro-note" id="macro-windows-note"></p>
-    </figure>
-    <details class="sentiment-method"><summary>How to read these signals</summary><p>These readings describe different populations and time horizons. VIX measures expected volatility, put/call ratios measure trading activity, AAII surveys the next six months, and CNN combines seven indicators. CNN overlaps with VIX and options data. We show their agreement or disagreement, not an average or a market forecast. Missing and stale readings are excluded. Daily readings become stale after 4 calendar days, AAII after 10, CNN after 2. Fetch time is separate from observation time.</p></details>
-    </div>
-  </section>
+  <nav class="page-tabs" id="page-tabs" role="tablist" aria-label="Dashboard sections">
+    <button type="button" role="tab" id="tab-scan" data-page="scan" aria-selected="true" aria-controls="page-scan"><span class="page-tab-name">IV scan</span></button>
+    <button type="button" role="tab" id="tab-sentiment" data-page="sentiment" aria-selected="false" aria-controls="page-sentiment" tabindex="-1"><span class="page-tab-name">Sentiment</span><span class="page-tab-label" id="tab-label-sentiment"></span></button>
+    <button type="button" role="tab" id="tab-leverage" data-page="leverage" aria-selected="false" aria-controls="page-leverage" tabindex="-1"><span class="page-tab-name">Leverage</span><span class="page-tab-label" id="tab-label-leverage"></span></button>
+    <button type="button" role="tab" id="tab-searches" data-page="searches" aria-selected="false" aria-controls="page-searches" tabindex="-1"><span class="page-tab-name">Searches</span><span class="page-tab-label" id="tab-label-searches"></span></button>
+  </nav>
 
-  <section class="macro panel" aria-labelledby="search-title">
-    <div class="macro-heading"><div><p class="eyebrow">Search attention · USA only</p><h2 id="search-title"><button type="button" class="macro-toggle" id="search-toggle" aria-expanded="true" aria-controls="search-body"><span class="chevron" aria-hidden="true"></span>Macro search concerns</button></h2></div><span id="search-summary" class="sentiment-badge">Awaiting data</span></div>
-    <div id="search-body">
-      <div class="seg search-views" id="search-view-seg" role="group" aria-label="Search history view">
-        <button type="button" data-search-view="recent" aria-pressed="true">Recent · daily</button>
-        <button type="button" data-search-view="historical" aria-pressed="false">2004–present · monthly</button>
+  <div class="page-panel" id="page-scan" role="tabpanel" aria-labelledby="tab-scan">
+    <div class="cap-tabs" id="cap-tabs" role="tablist" aria-label="Market capitalization in US dollars">
+      <button type="button" role="tab" id="cap-mid" data-cap="mid" aria-selected="true" aria-controls="cap-panel">US$1B–$100B</button>
+      <button type="button" role="tab" id="cap-large" data-cap="large" aria-selected="false" aria-controls="cap-panel" tabindex="-1">US$100B+</button>
+      <button type="button" role="tab" id="cap-watch" data-cap="watch" aria-selected="false" aria-controls="cap-panel" tabindex="-1">★ Watchlist</button>
+    </div>
+
+    <div class="cap-panel" id="cap-panel" role="tabpanel" aria-labelledby="cap-mid">
+    <section class="overview" aria-label="Today at a glance">
+      <div class="figures panel" id="figures"></div>
+      <figure class="dist panel">
+        <figcaption>
+          <span class="fig-title">Where the leaders sit</span>
+          <span class="fig-note" id="dist-note"></span>
+        </figcaption>
+        <div class="dist-frame" id="dist-frame">
+          <svg id="dist-chart" role="img" aria-labelledby="dist-desc"><desc id="dist-desc"></desc></svg>
+        </div>
+      </figure>
+    </section>
+
+    <section class="board panel" aria-labelledby="board-title">
+      <div class="board-head">
+        <div>
+          <h2 id="board-title">Top <span id="top-n">100</span> by 30-day implied volatility</h2>
+          <p class="board-sub" id="board-sub"></p>
+        </div>
+        <div class="controls">
+          <div class="seg" id="market-seg" role="radiogroup" aria-label="Listed on">
+            <button type="button" role="radio" id="mkt-all" data-market="all" aria-checked="true">All</button>
+            <button type="button" role="radio" id="mkt-us" data-market="us" aria-checked="false">US-listed</button>
+            <button type="button" role="radio" id="mkt-tsx" data-market="tsx" aria-checked="false">TSX-listed</button>
+          </div>
+          <label class="switch" for="hq-only">
+            <input type="checkbox" id="hq-only">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>US/Canada HQ only</span>
+          </label>
+          <div class="frame-control">
+            <span class="ctl-label">Price chart</span>
+            <div class="seg frames" id="frame-seg" role="radiogroup" aria-label="Price chart timeframe">
+              <button type="button" role="radio" data-frame="1H" aria-checked="false" tabindex="-1">1H</button>
+              <button type="button" role="radio" data-frame="4H" aria-checked="false" tabindex="-1">4H</button>
+              <button type="button" role="radio" data-frame="1D" aria-checked="true">1D</button>
+              <button type="button" role="radio" data-frame="1W" aria-checked="false" tabindex="-1">1W</button>
+              <button type="button" role="radio" data-frame="1M" aria-checked="false" tabindex="-1">1M</button>
+            </div>
+          </div>
+        </div>
       </div>
-      <p class="macro-note" id="search-note"></p>
-      <div class="macro-grid search-grid" id="search-cards"></div>
-      <details class="sentiment-method"><summary>What these searches tell us</summary><p>All six word searches use Google web searches from the USA only. They measure attention, not opinions or market direction. “War” can include entertainment and other non-geopolitical uses; this is a word search, not a topic classification.</p><p>Recent: the latest seven complete days are compared with the preceding 56 days within the same three-month download. At least 1.5× baseline is elevated; at most 0.75× is below baseline. Historical: the latest complete month is ranked against earlier complete months in the 2004–present download. The percentile is the share of earlier months below it, plus half of ties. At or above the 80th percentile is elevated. Each chart shows its actual available dates. Current partial months and days are excluded.</p><p>These are descriptive thresholds, not validated trading signals. Quiet searches do not imply optimism. Each download has its own relative 0–100 scale: raw values are never joined or compared across terms or views. Sparse data is excluded. Daily readings become stale after four days. Historical readings become stale if they omit the latest completed month or were fetched over 14 days ago. Recent data is collected at most daily and historical data weekly during a dashboard refresh, with a refresh due at the start of a new month. Google can revise sampled history; dated snapshots preserve what was retrieved. This panel remains separate from Fear &amp; Greed and stock sentiment scores.</p><a href="https://support.google.com/trends/answer/4365533?hl=en" target="_blank" rel="noopener noreferrer">About Google Trends data</a></details>
-    </div>
-  </section>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead>
+            <tr>
+              <th class="col-stock" data-sort="rank" aria-sort="none" data-tip-wait="2000" data-tip="Rank by IV30, ticker, exchange, company and what it does. Canadian companies that also trade in the US carry their TSX symbol."><button type="button">Stock</button></th>
+              <th class="col-industry" data-sort="industry" aria-sort="none" data-tip-wait="2000" data-tip="Yahoo's industry classification, with the broader sector beneath it. Sort this column to group similar names together."><button type="button">Industry</button></th>
+              <th class="col-sentiment" data-sort="sentiment" aria-sort="none" data-tip-wait="2000" data-tip="Sort by a transparent 0–100 stock/sector sentiment heuristic. Coverage and price-only labels distinguish momentum from news or social opinion. Expand the stock for components, dates, sources and scoring. Not a return forecast."><button type="button">Sentiment<br>Stock / sector</button></th>
+              <th data-sort="iv30" aria-sort="descending" data-tip-wait="2000" data-tip="Implied volatility for the next 30 days, annualized: the move the options market is pricing in. The bar compares each stock with the leader in this view."><button type="button">IV30</button></th>
+              <th class="col-why" data-sort="iv_why_kind" aria-sort="none" data-tip-wait="2000" data-tip="Business cycle and theme exposures, observed stock/peer moves, and possible company events. These are separate kinds of evidence; none proves the cause of IV. Expand for sources, dates and peer composition. Sort by event evidence."><button type="button">Why this IV</button></th>
+              <th data-sort="iv_rank" aria-sort="none" data-tip-wait="2000" data-tip="Where today's IV30 sits between the window's low (0) and high (100)."><button type="button">IV rank</button></th>
+              <th data-sort="iv_percentile" aria-sort="none" data-tip-wait="2000" data-tip="Share of sessions in the window that closed below today's IV30. Rank reads the range; percentile reads how often IV was lower."><button type="button">IV %</button></th>
+              <th class="nosort col-trend" data-tip-wait="2000" data-tip="IV30 session by session over the window, with its low, high and average printed underneath. Hover the line for a date and value.">IV history</th>
+              <th class="r" data-sort="hv30" aria-sort="none" data-tip-wait="2000" data-tip="Historical (realized) volatility: annualized standard deviation of the last 30 daily closes. Below it, IV30 ÷ HV30 — above 1 means options price a bigger move than the stock has made."><button type="button">HV30</button></th>
+              <th class="nosort col-price" data-tip-wait="2000" data-tip="Closing prices on the timeframe chosen above the table, with the move across that whole window — not the last bar. Underneath: RSI(14) and today's volume against its 20-day average."><span id="price-head">Price · 1D bars · 6 mo</span></th>
+              <th data-sort="range_pos" aria-sort="none" data-tip-wait="2000" data-tip="Last price between its 52-week low and high, with the distance below the high."><button type="button">52-wk price range</button></th>
+              <th class="r" data-sort="float_shares" aria-sort="none" data-tip-wait="2000" data-tip="Shares actually available to trade, and what share of all shares outstanding that is. A small float moves further on the same buying."><button type="button">Float</button></th>
+              <th class="r" data-sort="short_pct_float" aria-sort="none" data-tip-wait="2000" data-tip="Shorted shares as a percentage of float, with the change since the prior report. Published twice a month."><button type="button">Short % float</button></th>
+              <th class="r" data-sort="days_to_cover" aria-sort="none" data-tip-wait="2000" data-tip="Days of average trading volume it would take shorts to buy back every shorted share."><button type="button">Days to cover</button></th>
+              <th class="r" data-sort="borrow_fee" aria-sort="none" data-tip-wait="2000" data-tip="Annual cost to borrow the stock for shorting, from Interactive Brokers' daily file, with shares available underneath. A high fee means the short is expensive to hold — the pressure that actually forces covering."><button type="button">Borrow fee</button></th>
+              <th data-sort="squeeze" aria-sort="none" data-tip-wait="2000" data-tip="Short interest and days to cover combined into one flag: high, elevated or low. A screening heuristic, not a forecast."><button type="button">Squeeze setup</button></th>
+              <th class="r" data-sort="market_cap_usd" aria-sort="none" data-tip-wait="2000" data-tip="Market capitalization in US dollars; Canadian listings are converted at the day's rate. Everything here clears US$1B."><button type="button">Mkt cap</button></th>
+              <th data-sort="earnings_in_days" aria-sort="none" data-tip-wait="2000" data-tip="Next earnings report: date, hour in market time, and whether it lands before the open or after the close. 'est.' means Yahoo estimated the date, so no hour is shown."><button type="button">Earnings</button></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="empty" hidden>No stocks match these filters.</p>
+    </section>
 
-  <section class="macro panel" aria-labelledby="lever-title">
-    <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="lever-title"><button type="button" class="macro-toggle" id="lever-toggle" aria-expanded="true" aria-controls="lever-body"><span class="chevron" aria-hidden="true"></span>Market leverage</button></h2></div><span id="lever-summary" class="sentiment-badge">Awaiting data</span></div>
-    <p class="macro-oneline" id="lever-oneline" hidden></p>
-    <div id="lever-body">
-    <p class="macro-note" id="lever-note"></p>
-    <div class="macro-grid lever-grid" id="lever-cards"></div>
-    <figure class="macro-chart" aria-labelledby="lever-chart-title">
-      <figcaption class="macro-chart-head">
-        <div><span class="fig-title" id="lever-chart-title">S&amp;P 500 and leverage</span><span class="fig-note" id="lever-chart-note"></span></div>
-        <div class="macro-chart-controls">
-          <div class="seg" id="lever-series-seg" role="radiogroup" aria-label="Leverage series">
-            <button type="button" role="radio" data-lseries="finra" aria-checked="true">Margin debt</button>
-            <button type="button" role="radio" data-lseries="z1" aria-checked="false" tabindex="-1">Margin ÷ stocks</button>
-            <button type="button" role="radio" data-lseries="ofr" aria-checked="false" tabindex="-1">Hedge funds</button>
-            <button type="button" role="radio" data-lseries="ofr_gne" aria-checked="false" tabindex="-1">Hedge funds incl. derivatives</button>
-            <button type="button" role="radio" data-lseries="cot_lev" aria-checked="false" tabindex="-1">Leveraged funds</button>
-            <button type="button" role="radio" data-lseries="etf_bull" aria-checked="false" tabindex="-1">3× ETF bull share</button>
-            <button type="button" role="radio" data-lseries="etf_activity" aria-checked="false" tabindex="-1">3× ETF volume</button>
-          </div>
-          <div class="seg frames" id="lever-range-seg" role="radiogroup" aria-label="Time range">
-            <button type="button" role="radio" data-lrange="1M" aria-checked="false" tabindex="-1">1M</button>
-            <button type="button" role="radio" data-lrange="3M" aria-checked="false" tabindex="-1">3M</button>
-            <button type="button" role="radio" data-lrange="6M" aria-checked="false" tabindex="-1">6M</button>
-            <button type="button" role="radio" data-lrange="1Y" aria-checked="false" tabindex="-1">1Y</button>
-            <button type="button" role="radio" data-lrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
-            <button type="button" role="radio" data-lrange="10Y" aria-checked="true">10Y</button>
-            <button type="button" role="radio" data-lrange="20Y" aria-checked="false" tabindex="-1">20Y</button>
-            <button type="button" role="radio" data-lrange="MAX" aria-checked="false" tabindex="-1" title="Since July 1987, where the chart's S&amp;P 500 history begins">Max</button>
-          </div>
-          <label class="switch" for="lever-log"><input type="checkbox" id="lever-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
+    </div>
+    <section class="notes" aria-labelledby="notes-title">
+      <h2 id="notes-title">How to read this screen</h2>
+      <div class="notes-grid">
+        <div>
+          <h3>Who makes the list</h3>
+          <p>Common stocks on NYSE, Nasdaq, NYSE American, TSX or TSXV with a market cap above <span data-setting="cap"></span> and listed options, excluding <span data-setting="excluded"></span>, with independent top-100 lists for US$1B to below US$100B and US$100B or more. Each tab is ranked by 30-day implied volatility (IV30): the annualized move the options market is pricing for the next month. Canadian companies that also trade in New York appear once, on their US line where options are deeper, tagged with their TSX symbol.</p>
         </div>
-      </figcaption>
-      <div class="macro-legend" id="lever-legend"></div>
-      <div class="macro-plot" id="lever-plot"></div>
-      <div class="macro-windows-wrap"><table class="macro-windows" id="lever-windows"></table></div>
-      <p class="macro-note" id="lever-windows-note"></p>
-    </figure>
-    <details class="sentiment-method"><summary>How to read these measures</summary><p>Each card measures a different group of borrowers. FINRA and the Fed's Z.1 accounts count money individuals and firms borrow from brokers against stocks; the OFR's figures come from large hedge funds' own filings; CFTC positions are futures, which need only a margin deposit; 3× ETF trading is a daily proxy for leveraged retail appetite, not a count of borrowing. Monthly and quarterly releases arrive weeks after the period they describe, so each card shows the period its data covers, when that release came out, and when the next one is due. A scheduled date comes from the publisher; an estimated one follows its usual rhythm and can slip. Readings are ranked against each measure's own history: at or above the 80th percentile is marked elevated. High leverage makes selloffs sharper when it unwinds, but it can stay high for years, so these measures describe risk, not timing.</p></details>
-    </div>
-  </section>
-
-  <div class="cap-tabs" id="cap-tabs" role="tablist" aria-label="Market capitalization in US dollars">
-    <button type="button" role="tab" id="cap-mid" data-cap="mid" aria-selected="true" aria-controls="cap-panel">US$1B–$100B</button>
-    <button type="button" role="tab" id="cap-large" data-cap="large" aria-selected="false" aria-controls="cap-panel" tabindex="-1">US$100B+</button>
-    <button type="button" role="tab" id="cap-watch" data-cap="watch" aria-selected="false" aria-controls="cap-panel" tabindex="-1">★ Watchlist</button>
+        <div>
+          <h3>IV rank and percentile</h3>
+          <p><strong>IV rank</strong> places today’s IV30 between its low (0) and high (100) over the look-back, while <strong>IV percentile</strong> is the share of past sessions that closed below it — a stock can sit at rank 90 yet in the 60th percentile if it spent months near the middle and spiked once. The look-back is 52 weeks once enough history exists; until then each cell names the window it used, such as “13w”. The IV history column prints that window’s low, high and average under the sparkline, and history starts with about three months from AlphaQuery, growing with every daily run.</p>
+        </div>
+        <div>
+          <h3>Why this IV</h3>
+          <p>Structural context identifies business exposures such as commodity and memory cycles, AI/compute spending, documented AI disruption risk, and crypto activity. It comes from company profiles or linked issuer disclosures and does not assert what caused this session’s IV. Observed moves use roughly three months of completed daily closes through the IV date. Peer comparisons exclude the stock itself, require at least three other screened companies with the same exposure and identical start/end dates, and span both cap tabs. A broad move is highlighted only when the peer median rises or falls at least 20% and at least two-thirds move in that direction. This selected high-IV sample is not the whole industry; shared gains or losses do not establish hype or a common cause.</p>
+          <p>A possible event headline must name the company, describe a concrete event, include a source link and publisher, and be dated within seven days on or before the IV session. Its article body and connection to IV have not been independently verified. Upcoming earnings show date certainty: a scheduled report is potential event risk, not proof that it is driving IV. Insufficient event evidence stays “No clear catalyst found”, which does not establish that no catalyst exists, even when structural context is available; unavailable news is flagged separately, in the row and in its details. Expand a row for sources, observed dates and the peer list. IV measures expected magnitude, not the direction of the next move.</p>
+        </div>
+        <div>
+          <h3>HV30 and the IV ÷ HV ratio</h3>
+          <p><strong>HV30</strong> is historical (realized) volatility: the annualized standard deviation of the last 30 daily closes — what the stock actually did, rather than what options expect. The ratio beside it divides IV30 by HV30, so 2.0× means options price twice the movement the stock has been making, which usually points at an event ahead; below 1.0× the options are pricing less movement than the recent past.</p>
+        </div>
+        <div>
+          <h3>Squeeze setup</h3>
+          <p><span data-setting="squeeze"></span> <strong>Small float</strong> marks fewer than <span data-setting="small-float"></span> freely traded shares. Short interest is reported twice a month; each row’s details carry the settlement date, which dates the position itself, and the times the float and borrow feeds were retrieved. Providers do not publish their own update time for float, days to cover or borrow data. The <strong>borrow fee</strong> is what a short pays per year to hold the position, from Interactive Brokers’ daily lendable-stock file — a fee in the double digits means the position is expensive to keep, which is the pressure that forces covering, and a dash means no borrow was on offer at all. A setup is a screening flag, not a forecast.</p>
+        </div>
+        <div>
+          <h3>Price charts and earnings</h3>
+          <p>The price column plots closes on the timeframe picked above the table — hourly over the past week, 4-hour over the past month, daily over six months, weekly over two years, monthly over five — and a row’s details show all five at once, each with a MACD (12/26/9) pane beneath it. Under each chart, RSI(14) and today’s volume against its 20-day average flag what is moving now; both use completed sessions only, so a day still in progress never distorts them. Earnings times are market time (ET) and read “before open”, “during session” or “after close”. Yahoo pads an estimated date with a placeholder hour, so a row marked <strong>est.</strong> shows the date only.</p>
+        </div>
+        <div>
+          <h3>Sources and timing</h3>
+          <p>IV30 comes from Cboe delayed quotes for US listings and from Montréal Exchange option chains for TSX-only names (at-the-money IV interpolated to 30 days). Float, short interest, 52-week range, price history and earnings dates come from Yahoo Finance; stock lists from Nasdaq, OCC and TMX. Quotes are delayed about 15 minutes, so the daily run starts after the close.</p>
+        </div>
+      </div>
+    </section>
   </div>
 
-  <div class="cap-panel" id="cap-panel" role="tabpanel" aria-labelledby="cap-mid">
-  <section class="overview" aria-label="Today at a glance">
-    <div class="figures panel" id="figures"></div>
-    <figure class="dist panel">
-      <figcaption>
-        <span class="fig-title">Where the leaders sit</span>
-        <span class="fig-note" id="dist-note"></span>
-      </figcaption>
-      <div class="dist-frame" id="dist-frame">
-        <svg id="dist-chart" role="img" aria-labelledby="dist-desc"><desc id="dist-desc"></desc></svg>
-      </div>
-    </figure>
-  </section>
-
-  <section class="board panel" aria-labelledby="board-title">
-    <div class="board-head">
-      <div>
-        <h2 id="board-title">Top <span id="top-n">100</span> by 30-day implied volatility</h2>
-        <p class="board-sub" id="board-sub"></p>
-      </div>
-      <div class="controls">
-        <div class="seg" id="market-seg" role="radiogroup" aria-label="Listed on">
-          <button type="button" role="radio" id="mkt-all" data-market="all" aria-checked="true">All</button>
-          <button type="button" role="radio" id="mkt-us" data-market="us" aria-checked="false">US-listed</button>
-          <button type="button" role="radio" id="mkt-tsx" data-market="tsx" aria-checked="false">TSX-listed</button>
-        </div>
-        <label class="switch" for="hq-only">
-          <input type="checkbox" id="hq-only">
-          <span class="switch-track" aria-hidden="true"></span>
-          <span>US/Canada HQ only</span>
-        </label>
-        <div class="frame-control">
-          <span class="ctl-label">Price chart</span>
-          <div class="seg frames" id="frame-seg" role="radiogroup" aria-label="Price chart timeframe">
-            <button type="button" role="radio" data-frame="1H" aria-checked="false" tabindex="-1">1H</button>
-            <button type="button" role="radio" data-frame="4H" aria-checked="false" tabindex="-1">4H</button>
-            <button type="button" role="radio" data-frame="1D" aria-checked="true">1D</button>
-            <button type="button" role="radio" data-frame="1W" aria-checked="false" tabindex="-1">1W</button>
-            <button type="button" role="radio" data-frame="1M" aria-checked="false" tabindex="-1">1M</button>
+  <div class="page-panel" id="page-sentiment" role="tabpanel" aria-labelledby="tab-sentiment" hidden>
+    <section class="macro panel" aria-labelledby="macro-title">
+      <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="macro-title">Macro sentiment</h2></div></div>
+      <div class="verdict" id="verdict-sentiment" aria-live="polite"></div>
+      <div id="macro-body">
+      <p class="macro-note" id="macro-note"></p>
+      <div class="macro-grid" id="macro-cards"></div>
+      <figure class="macro-chart" aria-labelledby="macro-chart-title">
+        <figcaption class="macro-chart-head">
+          <div><span class="fig-title" id="macro-chart-title">S&amp;P 500 and sentiment</span><span class="fig-note" id="macro-chart-note"></span></div>
+          <div class="macro-chart-controls">
+            <div class="seg" id="macro-series-seg" role="radiogroup" aria-label="Sentiment series">
+              <button type="button" role="radio" data-mseries="aaii" aria-checked="true">AAII</button>
+              <button type="button" role="radio" data-mseries="vix" aria-checked="false" tabindex="-1">VIX</button>
+              <button type="button" role="radio" data-mseries="put_call" aria-checked="false" tabindex="-1">Put/call</button>
+              <button type="button" role="radio" data-mseries="fear_greed" aria-checked="false" tabindex="-1">Fear &amp; Greed</button>
+              <button type="button" role="radio" data-mseries="cot" aria-checked="false" tabindex="-1">COT</button>
+              <button type="button" role="radio" data-mseries="rsi" aria-checked="false" tabindex="-1">RSI</button>
+              <button type="button" role="radio" data-mseries="macd" aria-checked="false" tabindex="-1">MACD</button>
+            </div>
+            <div class="seg frames" id="macro-range-seg" role="radiogroup" aria-label="Time range">
+              <button type="button" role="radio" data-mrange="1M" aria-checked="false" tabindex="-1">1M</button>
+              <button type="button" role="radio" data-mrange="3M" aria-checked="false" tabindex="-1">3M</button>
+              <button type="button" role="radio" data-mrange="6M" aria-checked="false" tabindex="-1">6M</button>
+              <button type="button" role="radio" data-mrange="1Y" aria-checked="true">1Y</button>
+              <button type="button" role="radio" data-mrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
+              <button type="button" role="radio" data-mrange="10Y" aria-checked="false" tabindex="-1">10Y</button>
+              <button type="button" role="radio" data-mrange="20Y" aria-checked="false" tabindex="-1">20Y</button>
+              <button type="button" role="radio" data-mrange="MAX" aria-checked="false" tabindex="-1" title="Since July 1987, when AAII's survey begins">Max</button>
+            </div>
+            <label class="switch" for="macro-log"><input type="checkbox" id="macro-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
           </div>
-        </div>
+        </figcaption>
+        <div class="macro-legend" id="macro-legend"></div>
+        <div class="macro-plot" id="macro-plot"></div>
+        <div class="macro-windows-wrap"><table class="macro-windows" id="macro-windows"></table></div>
+        <p class="macro-note" id="macro-windows-note"></p>
+      </figure>
+      <details class="sentiment-method"><summary>How to read these signals</summary><p>These readings describe different populations and time horizons. VIX measures expected volatility, put/call ratios measure trading activity, AAII surveys the next six months, and CNN combines seven indicators. CNN overlaps with VIX and options data. We show their agreement or disagreement, not an average or a market forecast. Missing and stale readings are excluded. Daily readings become stale after 4 calendar days, AAII after 10, CNN after 2. Fetch time is separate from observation time.</p></details>
       </div>
-    </div>
-    <div class="table-wrap">
-      <table class="grid">
-        <thead>
-          <tr>
-            <th class="col-stock" data-sort="rank" aria-sort="none" data-tip-wait="2000" data-tip="Rank by IV30, ticker, exchange, company and what it does. Canadian companies that also trade in the US carry their TSX symbol."><button type="button">Stock</button></th>
-            <th class="col-industry" data-sort="industry" aria-sort="none" data-tip-wait="2000" data-tip="Yahoo's industry classification, with the broader sector beneath it. Sort this column to group similar names together."><button type="button">Industry</button></th>
-            <th class="col-sentiment" data-sort="sentiment" aria-sort="none" data-tip-wait="2000" data-tip="Sort by a transparent 0–100 stock/sector sentiment heuristic. Coverage and price-only labels distinguish momentum from news or social opinion. Expand the stock for components, dates, sources and scoring. Not a return forecast."><button type="button">Sentiment<br>Stock / sector</button></th>
-            <th data-sort="iv30" aria-sort="descending" data-tip-wait="2000" data-tip="Implied volatility for the next 30 days, annualized: the move the options market is pricing in. The bar compares each stock with the leader in this view."><button type="button">IV30</button></th>
-            <th class="col-why" data-sort="iv_why_kind" aria-sort="none" data-tip-wait="2000" data-tip="Business cycle and theme exposures, observed stock/peer moves, and possible company events. These are separate kinds of evidence; none proves the cause of IV. Expand for sources, dates and peer composition. Sort by event evidence."><button type="button">Why this IV</button></th>
-            <th data-sort="iv_rank" aria-sort="none" data-tip-wait="2000" data-tip="Where today's IV30 sits between the window's low (0) and high (100)."><button type="button">IV rank</button></th>
-            <th data-sort="iv_percentile" aria-sort="none" data-tip-wait="2000" data-tip="Share of sessions in the window that closed below today's IV30. Rank reads the range; percentile reads how often IV was lower."><button type="button">IV %</button></th>
-            <th class="nosort col-trend" data-tip-wait="2000" data-tip="IV30 session by session over the window, with its low, high and average printed underneath. Hover the line for a date and value.">IV history</th>
-            <th class="r" data-sort="hv30" aria-sort="none" data-tip-wait="2000" data-tip="Historical (realized) volatility: annualized standard deviation of the last 30 daily closes. Below it, IV30 ÷ HV30 — above 1 means options price a bigger move than the stock has made."><button type="button">HV30</button></th>
-            <th class="nosort col-price" data-tip-wait="2000" data-tip="Closing prices on the timeframe chosen above the table, with the move across that whole window — not the last bar. Underneath: RSI(14) and today's volume against its 20-day average."><span id="price-head">Price · 1D bars · 6 mo</span></th>
-            <th data-sort="range_pos" aria-sort="none" data-tip-wait="2000" data-tip="Last price between its 52-week low and high, with the distance below the high."><button type="button">52-wk price range</button></th>
-            <th class="r" data-sort="float_shares" aria-sort="none" data-tip-wait="2000" data-tip="Shares actually available to trade, and what share of all shares outstanding that is. A small float moves further on the same buying."><button type="button">Float</button></th>
-            <th class="r" data-sort="short_pct_float" aria-sort="none" data-tip-wait="2000" data-tip="Shorted shares as a percentage of float, with the change since the prior report. Published twice a month."><button type="button">Short % float</button></th>
-            <th class="r" data-sort="days_to_cover" aria-sort="none" data-tip-wait="2000" data-tip="Days of average trading volume it would take shorts to buy back every shorted share."><button type="button">Days to cover</button></th>
-            <th class="r" data-sort="borrow_fee" aria-sort="none" data-tip-wait="2000" data-tip="Annual cost to borrow the stock for shorting, from Interactive Brokers' daily file, with shares available underneath. A high fee means the short is expensive to hold — the pressure that actually forces covering."><button type="button">Borrow fee</button></th>
-            <th data-sort="squeeze" aria-sort="none" data-tip-wait="2000" data-tip="Short interest and days to cover combined into one flag: high, elevated or low. A screening heuristic, not a forecast."><button type="button">Squeeze setup</button></th>
-            <th class="r" data-sort="market_cap_usd" aria-sort="none" data-tip-wait="2000" data-tip="Market capitalization in US dollars; Canadian listings are converted at the day's rate. Everything here clears US$1B."><button type="button">Mkt cap</button></th>
-            <th data-sort="earnings_in_days" aria-sort="none" data-tip-wait="2000" data-tip="Next earnings report: date, hour in market time, and whether it lands before the open or after the close. 'est.' means Yahoo estimated the date, so no hour is shown."><button type="button">Earnings</button></th>
-          </tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-    </div>
-    <p class="empty" id="empty" hidden>No stocks match these filters.</p>
-  </section>
-
+    </section>
   </div>
-  <section class="notes" aria-labelledby="notes-title">
-    <h2 id="notes-title">How to read this screen</h2>
-    <div class="notes-grid">
-      <div>
-        <h3>Who makes the list</h3>
-        <p>Common stocks on NYSE, Nasdaq, NYSE American, TSX or TSXV with a market cap above <span data-setting="cap"></span> and listed options, excluding <span data-setting="excluded"></span>, with independent top-100 lists for US$1B to below US$100B and US$100B or more. Each tab is ranked by 30-day implied volatility (IV30): the annualized move the options market is pricing for the next month. Canadian companies that also trade in New York appear once, on their US line where options are deeper, tagged with their TSX symbol.</p>
+
+  <div class="page-panel" id="page-leverage" role="tabpanel" aria-labelledby="tab-leverage" hidden>
+    <section class="macro panel" aria-labelledby="lever-title">
+      <div class="macro-heading"><div><p class="eyebrow">Market context · US</p><h2 id="lever-title">Market leverage</h2></div></div>
+      <div class="verdict" id="verdict-leverage" aria-live="polite"></div>
+      <div id="lever-body">
+      <p class="macro-note" id="lever-note"></p>
+      <div class="macro-grid lever-grid" id="lever-cards"></div>
+      <figure class="macro-chart" aria-labelledby="lever-chart-title">
+        <figcaption class="macro-chart-head">
+          <div><span class="fig-title" id="lever-chart-title">S&amp;P 500 and leverage</span><span class="fig-note" id="lever-chart-note"></span></div>
+          <div class="macro-chart-controls">
+            <div class="seg" id="lever-series-seg" role="radiogroup" aria-label="Leverage series">
+              <button type="button" role="radio" data-lseries="finra" aria-checked="true">Margin debt</button>
+              <button type="button" role="radio" data-lseries="z1" aria-checked="false" tabindex="-1">Margin ÷ stocks</button>
+              <button type="button" role="radio" data-lseries="ofr" aria-checked="false" tabindex="-1">Hedge funds</button>
+              <button type="button" role="radio" data-lseries="ofr_gne" aria-checked="false" tabindex="-1">Hedge funds incl. derivatives</button>
+              <button type="button" role="radio" data-lseries="cot_lev" aria-checked="false" tabindex="-1">Leveraged funds</button>
+              <button type="button" role="radio" data-lseries="etf_bull" aria-checked="false" tabindex="-1">3× ETF bull share</button>
+              <button type="button" role="radio" data-lseries="etf_activity" aria-checked="false" tabindex="-1">3× ETF volume</button>
+            </div>
+            <div class="seg frames" id="lever-range-seg" role="radiogroup" aria-label="Time range">
+              <button type="button" role="radio" data-lrange="1M" aria-checked="false" tabindex="-1">1M</button>
+              <button type="button" role="radio" data-lrange="3M" aria-checked="false" tabindex="-1">3M</button>
+              <button type="button" role="radio" data-lrange="6M" aria-checked="false" tabindex="-1">6M</button>
+              <button type="button" role="radio" data-lrange="1Y" aria-checked="false" tabindex="-1">1Y</button>
+              <button type="button" role="radio" data-lrange="5Y" aria-checked="false" tabindex="-1">5Y</button>
+              <button type="button" role="radio" data-lrange="10Y" aria-checked="true">10Y</button>
+              <button type="button" role="radio" data-lrange="20Y" aria-checked="false" tabindex="-1">20Y</button>
+              <button type="button" role="radio" data-lrange="MAX" aria-checked="false" tabindex="-1" title="Since July 1987, where the chart's S&amp;P 500 history begins">Max</button>
+            </div>
+            <label class="switch" for="lever-log"><input type="checkbox" id="lever-log"><span class="switch-track" aria-hidden="true"></span><span>Log scale</span></label>
+          </div>
+        </figcaption>
+        <div class="macro-legend" id="lever-legend"></div>
+        <div class="macro-plot" id="lever-plot"></div>
+        <div class="macro-windows-wrap"><table class="macro-windows" id="lever-windows"></table></div>
+        <p class="macro-note" id="lever-windows-note"></p>
+      </figure>
+      <details class="sentiment-method"><summary>How to read these measures</summary><p>Each card measures a different group of borrowers. FINRA and the Fed's Z.1 accounts count money individuals and firms borrow from brokers against stocks; the OFR's figures come from large hedge funds' own filings; CFTC positions are futures, which need only a margin deposit; 3× ETF trading is a daily proxy for leveraged retail appetite, not a count of borrowing. Monthly and quarterly releases arrive weeks after the period they describe, so each card shows the period its data covers, when that release came out, and when the next one is due. A scheduled date comes from the publisher; an estimated one follows its usual rhythm and can slip. Readings are ranked against each measure's own history: at or above the 80th percentile is marked elevated. High leverage makes selloffs sharper when it unwinds, but it can stay high for years, so these measures describe risk, not timing.</p></details>
       </div>
-      <div>
-        <h3>IV rank and percentile</h3>
-        <p><strong>IV rank</strong> places today’s IV30 between its low (0) and high (100) over the look-back, while <strong>IV percentile</strong> is the share of past sessions that closed below it — a stock can sit at rank 90 yet in the 60th percentile if it spent months near the middle and spiked once. The look-back is 52 weeks once enough history exists; until then each cell names the window it used, such as “13w”. The IV history column prints that window’s low, high and average under the sparkline, and history starts with about three months from AlphaQuery, growing with every daily run.</p>
+    </section>
+  </div>
+
+  <div class="page-panel" id="page-searches" role="tabpanel" aria-labelledby="tab-searches" hidden>
+    <section class="macro panel" aria-labelledby="search-title">
+      <div class="macro-heading"><div><p class="eyebrow">Search attention · USA only</p><h2 id="search-title">Macro search concerns</h2></div></div>
+      <div class="verdict" id="verdict-searches" aria-live="polite"></div>
+      <div id="search-body">
+        <div class="seg search-views" id="search-view-seg" role="group" aria-label="Search history view">
+          <button type="button" data-search-view="recent" aria-pressed="true">Recent · daily</button>
+          <button type="button" data-search-view="historical" aria-pressed="false">2004–present · monthly</button>
+        </div>
+        <p class="macro-note" id="search-note"></p>
+        <div class="macro-grid search-grid" id="search-cards"></div>
+        <details class="sentiment-method"><summary>What these searches tell us</summary><p>All six word searches use Google web searches from the USA only. They measure attention, not opinions or market direction. “War” can include entertainment and other non-geopolitical uses; this is a word search, not a topic classification.</p><p>Recent: the latest seven complete days are compared with the preceding 56 days within the same three-month download. At least 1.5× baseline is elevated; at most 0.75× is below baseline. Historical: the latest complete month is ranked against earlier complete months in the 2004–present download. The percentile is the share of earlier months below it, plus half of ties. At or above the 80th percentile is elevated. Each chart shows its actual available dates. Current partial months and days are excluded.</p><p>These are descriptive thresholds, not validated trading signals. Quiet searches do not imply optimism. Each download has its own relative 0–100 scale: raw values are never joined or compared across terms or views. Sparse data is excluded. Daily readings become stale after four days. Historical readings become stale if they omit the latest completed month or were fetched over 14 days ago. Recent data is collected at most daily and historical data weekly during a dashboard refresh, with a refresh due at the start of a new month. Google can revise sampled history; dated snapshots preserve what was retrieved. This panel remains separate from Fear &amp; Greed and stock sentiment scores.</p><a href="https://support.google.com/trends/answer/4365533?hl=en" target="_blank" rel="noopener noreferrer">About Google Trends data</a></details>
       </div>
-      <div>
-        <h3>Why this IV</h3>
-        <p>Structural context identifies business exposures such as commodity and memory cycles, AI/compute spending, documented AI disruption risk, and crypto activity. It comes from company profiles or linked issuer disclosures and does not assert what caused this session’s IV. Observed moves use roughly three months of completed daily closes through the IV date. Peer comparisons exclude the stock itself, require at least three other screened companies with the same exposure and identical start/end dates, and span both cap tabs. A broad move is highlighted only when the peer median rises or falls at least 20% and at least two-thirds move in that direction. This selected high-IV sample is not the whole industry; shared gains or losses do not establish hype or a common cause.</p>
-        <p>A possible event headline must name the company, describe a concrete event, include a source link and publisher, and be dated within seven days on or before the IV session. Its article body and connection to IV have not been independently verified. Upcoming earnings show date certainty: a scheduled report is potential event risk, not proof that it is driving IV. Insufficient event evidence stays “No clear catalyst found”, which does not establish that no catalyst exists, even when structural context is available; unavailable news is flagged separately, in the row and in its details. Expand a row for sources, observed dates and the peer list. IV measures expected magnitude, not the direction of the next move.</p>
-      </div>
-      <div>
-        <h3>HV30 and the IV ÷ HV ratio</h3>
-        <p><strong>HV30</strong> is historical (realized) volatility: the annualized standard deviation of the last 30 daily closes — what the stock actually did, rather than what options expect. The ratio beside it divides IV30 by HV30, so 2.0× means options price twice the movement the stock has been making, which usually points at an event ahead; below 1.0× the options are pricing less movement than the recent past.</p>
-      </div>
-      <div>
-        <h3>Squeeze setup</h3>
-        <p><span data-setting="squeeze"></span> <strong>Small float</strong> marks fewer than <span data-setting="small-float"></span> freely traded shares. Short interest is reported twice a month; each row’s details carry the settlement date, which dates the position itself, and the times the float and borrow feeds were retrieved. Providers do not publish their own update time for float, days to cover or borrow data. The <strong>borrow fee</strong> is what a short pays per year to hold the position, from Interactive Brokers’ daily lendable-stock file — a fee in the double digits means the position is expensive to keep, which is the pressure that forces covering, and a dash means no borrow was on offer at all. A setup is a screening flag, not a forecast.</p>
-      </div>
-      <div>
-        <h3>Price charts and earnings</h3>
-        <p>The price column plots closes on the timeframe picked above the table — hourly over the past week, 4-hour over the past month, daily over six months, weekly over two years, monthly over five — and a row’s details show all five at once, each with a MACD (12/26/9) pane beneath it. Under each chart, RSI(14) and today’s volume against its 20-day average flag what is moving now; both use completed sessions only, so a day still in progress never distorts them. Earnings times are market time (ET) and read “before open”, “during session” or “after close”. Yahoo pads an estimated date with a placeholder hour, so a row marked <strong>est.</strong> shows the date only.</p>
-      </div>
-      <div>
-        <h3>Sources and timing</h3>
-        <p>IV30 comes from Cboe delayed quotes for US listings and from Montréal Exchange option chains for TSX-only names (at-the-money IV interpolated to 30 days). Float, short interest, 52-week range, price history and earnings dates come from Yahoo Finance; stock lists from Nasdaq, OCC and TMX. Quotes are delayed about 15 minutes, so the daily run starts after the close.</p>
-      </div>
-    </div>
-  </section>
+    </section>
+  </div>
 
   <footer class="foot">
     <p id="foot-meta"></p>

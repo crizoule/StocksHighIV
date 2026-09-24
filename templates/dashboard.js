@@ -19,7 +19,8 @@
   const FRAME_WINDOW = { "1H": "1 wk", "4H": "1 mo", "1D": "6 mo", "1W": "2 yr", "1M": "5 yr" };
   const $ = (id) => document.getElementById(id);
 
-  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, macroOpen: true, lseries: "finra", lrange: "10Y", llog: false, leverOpen: true };
+  const PAGES = ["scan", "sentiment", "leverage", "searches"];
+  const state = { cap: "mid", market: "all", hqOnly: false, frame: FRAMES.includes("1D") ? "1D" : FRAMES[0], sort: { key: "iv30", dir: "desc" }, open: new Set(), mseries: "aaii", mrange: "1Y", mlog: false, lseries: "finra", lrange: "10Y", llog: false, page: "scan" };
   try {
     const saved = JSON.parse(localStorage.getItem("ivl-view") || "null");
     if (saved && ["mid", "large", "watch"].includes(saved.cap)) state.cap = saved.cap;
@@ -30,12 +31,13 @@
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
     if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_bull", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.lrange)) state.lrange = saved.lrange;
-    if (saved) { state.mlog = saved.mlog === true; state.macroOpen = saved.macroOpen !== false; state.llog = saved.llog === true; state.leverOpen = saved.leverOpen !== false; }
+    if (saved && PAGES.includes(saved.page)) state.page = saved.page;
+    if (saved) { state.mlog = saved.mlog === true; state.llog = saved.llog === true; }
   } catch (err) { /* storage unavailable: defaults apply */ }
   const persist = () => {
     try {
-      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog, macroOpen: state.macroOpen,
-        lseries: state.lseries, lrange: state.lrange, llog: state.llog, leverOpen: state.leverOpen }));
+      localStorage.setItem("ivl-view", JSON.stringify({ cap: state.cap, market: state.market, hqOnly: state.hqOnly, frame: state.frame, mseries: state.mseries, mrange: state.mrange, mlog: state.mlog,
+        lseries: state.lseries, lrange: state.lrange, llog: state.llog, page: state.page }));
     } catch (err) { /* ignore */ }
   };
 
@@ -163,18 +165,8 @@
     ];
     const cards = defaults.map(d => ({...d, ...(DATA.macro_sentiment?.cards || []).find(c => c.key === d.key)}))
       .map(c => ({...c, name: renamed(c.name), usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
-    // Collapsed, the panel keeps one line with each reading; expanded, the cards and chart.
-    $("macro-toggle").setAttribute("aria-expanded", String(state.macroOpen));
-    $("macro-body").hidden = !state.macroOpen;
-    $("macro-oneline").hidden = state.macroOpen;
-    $("macro-oneline").innerHTML = cards.map(c => {
-      const label = {vix: "VIX", put_call: "Put/call", aaii: "AAII", cnn: c.replica_of ? "Fear & Greed (replica)" : "Fear & Greed", cot: "COT"}[c.key];
-      const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
-      return `<span><b>${esc(label)}</b> ${c.usable ? `${esc(c.reading)} · ${esc(c.signal)}` : stale ? "stale" : "—"}</span>`;
-    }).join("");
     const available = cards.filter(c => c.usable);
-    const positive = available.filter(c => c.direction > 0).length, negative = available.filter(c => c.direction < 0).length;
-    $("macro-summary").textContent = available.length < 3 ? "Limited coverage" : positive && negative ? "Mixed signals" : positive >= 2 ? "Risk appetite leaning positive" : negative >= 2 ? "Cautious mood" : "Mixed signals";
+    renderVerdict("sentiment", sentimentParts());
     $("macro-note").textContent = `${available.length}/${cards.length} fresh readings · Each source keeps its own observation date. ${DATA.macro_sentiment?.checked_at ? `Sources checked ${fetchedLabel(DATA.macro_sentiment.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect sentiment."} This panel is independent of the IV scan session.`;
     $("macro-cards").innerHTML = cards.map(c => {
       const stale = isNum(c.value) && !sentimentFresh(c.as_of, c.max_age || 4);
@@ -221,15 +213,11 @@
   const renderMacroSearch = () => {
     const panel = DATA.macro_search || {}, historical = searchView === "historical";
     const saved = historical ? panel.historical_cards : panel.cards;
-    const now = new Date(), lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10);
-    const cards = searchTerms.map(term => ({term, ...(saved || []).find(c => c.term === term)})).map(c => {
-      const fresh = c.status === "ok" && (historical ? c.as_of >= lastMonthEnd : sentimentFresh(c.as_of, 4)) && sentimentFresh(String(c.fetched_at || "").slice(0, 10), historical ? 14 : 4);
-      return {...c, fresh, usable: fresh && isNum(historical ? c.percentile : c.ratio)};
-    });
+    const now = new Date();
+    const cards = searchTerms.map(term => ({term, ...(saved || []).find(c => c.term === term)})).map(c => ({...c, ...searchUsable(c, historical, now)}));
     document.querySelectorAll("#search-view-seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.searchView === searchView)));
-    const usable = cards.filter(c => c.usable), elevated = usable.filter(c => historical ? c.percentile >= 80 : c.ratio >= 1.5);
-    $("search-summary").textContent = usable.length ? `${elevated.length}/${usable.length} elevated` : "Insufficient fresh data";
-    $("search-summary").className = `sentiment-badge${elevated.length ? " elevated" : ""}`;
+    const usable = cards.filter(c => c.usable);
+    renderVerdict("searches", searchParts());
     const strongest = [...usable].sort((a, b) => historical ? b.percentile - a.percentile : b.ratio - a.ratio)[0];
     $("search-note").textContent = `${usable.length}/${searchTerms.length} usable readings · USA only · ` +
       (historical ? "Latest complete month ranked against earlier months in its full history. " : "Latest complete week vs preceding eight weeks. ") +
@@ -249,6 +237,134 @@
         (c.error ? `<p class="macro-note">${esc(c.error)}</p>` : "") +
         (c.url ? sentimentLink(c.url, "Open Google Trends · USA") : "") + `</article>`;
     }).join("");
+  };
+
+  /* ---------- tab labels: one weighted reading per context tab ---------- */
+  // Each input maps its reading onto −1 (bearish) … +1 (bullish) and carries a base weight. Only fresh inputs count;
+  // their weights are rescaled to 100%. Computed here rather than when the report is saved, so an older saved
+  // report gets the same label as a fresh one.
+  const clamp1 = (v, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, v));
+  const pctRank = (values, current) => {  // share of the history below the reading, ties counted half: 0–100
+    if (values.length < 12) return null;
+    let below = 0, tied = 0;
+    for (const v of values) { if (v < current) below += 1; else if (v === current) tied += 1; }
+    return (below + tied / 2) / values.length * 100;
+  };
+  const HISTORIC = 2;  // percentile distance from either end of a series' own history that counts as historic
+  const VERDICT_BANDS = [[0.5, "Bullish", "positive"], [0.2, "Leaning bullish", "positive"], [-0.2, null, "mixed"], [-0.5, "Leaning bearish", "negative"], [-Infinity, "Bearish", "negative"]];
+  const MIN_COVERAGE = 50;
+  const verdict = (parts) => {
+    const used = parts.filter((p) => isNum(p.score));
+    const total = parts.reduce((s, p) => s + p.weight, 0), weight = used.reduce((s, p) => s + p.weight, 0);
+    const coverage = total ? weight / total * 100 : 0;
+    const rows = parts.map((p) => ({ ...p, share: isNum(p.score) && weight ? p.weight / weight * 100 : null }));
+    if (used.length < 3 || coverage < MIN_COVERAGE) return { label: "Insufficient data", tone: "unknown", score: null, coverage, rows };
+    const score = used.reduce((s, p) => s + p.score * p.weight, 0) / weight;
+    const [, name, tone] = VERDICT_BANDS.find(([floor]) => score >= floor);
+    // Near zero, strong inputs pulling both ways read as Mixed; weak inputs all round read as Neutral.
+    const label = name || (used.some((p) => p.score >= 0.5) && used.some((p) => p.score <= -0.5) ? "Mixed" : "Neutral");
+    const extreme = used.filter((p) => isNum(p.pct) && (p.pct >= 100 - HISTORIC || p.pct <= HISTORIC))
+      .sort((a, b) => Math.abs(b.pct - 50) - Math.abs(a.pct - 50))[0];
+    return { label, tone, score, coverage, rows, historic: extreme ? { side: extreme.pct >= 50 ? "high" : "low", part: extreme } : null };
+  };
+  const seriesValues = (points) => (Array.isArray(points) ? points : []).filter((p) => Array.isArray(p) && isNum(p[1]));
+  const lastPair = (points) => { const s = seriesValues(points); return s.length ? s[s.length - 1] : null; };
+  const signed2 = (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${nf2.format(Math.abs(v))}`;
+
+  const sentimentParts = () => {
+    const cards = DATA.macro_sentiment?.cards || [], history = DATA.macro_sentiment?.history?.series || {};
+    const card = (key) => { const c = cards.find((x) => x.key === key) || {}; return isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4) ? c : null; };
+    const ranked = (series, value) => pctRank(seriesValues(history[series]?.points).map((p) => p[1]), value);
+    const spec = [
+      // Direct measures of different crowds get the most weight; Fear & Greed is partly built from VIX and put/call.
+      { key: "vix", name: "VIX", weight: 25, rule: "20 = 0; 10 points lower = +1, higher = −1", score: (c) => clamp1((20 - c.value) / 10), series: "vix" },
+      { key: "aaii", name: "AAII bull–bear spread", weight: 25, rule: "0 = 0; ±25 pp = ±1", score: (c) => clamp1(c.value / 25), series: "aaii" },
+      { key: "cot", name: "COT asset managers (3-year index)", weight: 20, rule: "index 50 = 0; 100 = +1, 0 = −1", score: (c) => isNum(c.index) ? clamp1((c.index - 50) / 50) : null },
+      { key: "put_call", name: "Equity put/call", weight: 15, rule: "0.70 = 0; 0.45 = +1, 0.95 = −1", score: (c) => clamp1((0.7 - c.value) / 0.25) },
+      { key: "cnn", name: "Fear & Greed", weight: 15, rule: "50 = 0; 90 = +1, 10 = −1", score: (c) => clamp1((c.value - 50) / 40), series: "fear_greed" },
+    ];
+    return spec.map((s) => {
+      const c = card(s.key), score = c ? s.score(c) : null;
+      return { ...s, score, reading: c ? c.reading : "No fresh reading", as_of: c?.as_of, pct: c && s.series && isNum(score) ? ranked(s.series, c.value) : null };
+    });
+  };
+  // Leverage near the top of its own history is fragility: the higher the percentile, the more bearish.
+  const LEVER_MAX_AGE = { daily: 7, weekly: 21, monthly: 75, quarterly: 200 };
+  const shown = (key, unit, v) => unit === "×" ? `${nf2.format(v)}×` : unit !== "%" ? nf2.format(v)
+    : ["finra", "cot_lev"].includes(key) ? signedFmt(1, "%")(v) : `${nf1.format(v)}%`;  // changes and net positions carry a sign
+  const leverParts = () => {
+    const cards = DATA.market_leverage?.cards || [], series = DATA.market_leverage?.series || {};
+    const spec = [
+      { key: "finra", card: "finra", name: "Margin debt, 12-month change (FINRA)", weight: 25 },
+      { key: "z1", card: "z1", name: "Margin loans ÷ stock market value (Fed Z.1)", weight: 15 },
+      { key: "ofr", card: "ofr", name: "Hedge fund balance-sheet leverage (OFR)", weight: 15 },
+      { key: "ofr_gne", card: "ofr", name: "Hedge fund leverage incl. derivatives (OFR)", weight: 10 },
+      { key: "cot_lev", card: "cot", name: "Leveraged funds in S&P futures (CFTC, 3 years)", weight: 10, window: 156, crowding: true },
+      { key: "etf_activity", card: "etf", name: "3× ETF volume vs SPY + QQQ", weight: 15 },
+      { key: "etf_bull", card: "etf", name: "3× ETF bull share", weight: 10 },
+    ];
+    return spec.map((s) => {
+      const c = cards.find((x) => x.key === s.card) || {}, values = seriesValues(series[s.key]?.points), last = values[values.length - 1];
+      const maxAge = LEVER_MAX_AGE[c.frequency] || 7;
+      const fresh = ["ok", "cached"].includes(c.status) && last && sentimentFresh(last[0], maxAge);
+      const window = s.window ? values.slice(-s.window) : values;
+      const pct = fresh ? pctRank(window.map((p) => p[1]), last[1]) : null;
+      // Leveraged funds can crowd either way (a deep net short is often a borrowed-money basis trade), so distance from the middle counts.
+      const score = isNum(pct) ? clamp1(s.crowding ? -Math.abs(pct - 50) / 50 : -(pct - 50) / 50) : null;
+      const unit = series[s.key]?.unit || "";
+      return { ...s, score, pct: s.crowding ? null : pct, as_of: last?.[0],
+               rule: s.crowding ? "50th percentile = 0; either extreme = −1" : "50th percentile = 0; 100th = −1, 0th = +1",
+               reading: fresh ? `${shown(s.key, unit, last[1])} · ${ordinal(Math.round(pct))} pct${s.window ? " (3 yr)" : ""}`
+                 : !["ok", "cached"].includes(c.status) ? "Unavailable" : last ? "Stale" : "No reading" };
+    });
+  };
+  // Searches: more attention to recession, crashes or war reads bearish. Quiet searches cap below the Bullish band
+  // (Leaning bullish at most), because low attention does not mean optimism.
+  const SEARCH_CAP = 0.4;
+  const searchUsable = (c, historical, now = new Date()) => {
+    const lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10);
+    const fresh = c.status === "ok" && (historical ? c.as_of >= lastMonthEnd : sentimentFresh(c.as_of, 4)) && sentimentFresh(String(c.fetched_at || "").slice(0, 10), historical ? 14 : 4);
+    return { fresh, usable: fresh && isNum(historical ? c.percentile : c.ratio) };
+  };
+  const searchParts = () => {
+    const panel = DATA.macro_search || {};
+    return searchTerms.map((term) => {
+      const recent = (panel.cards || []).find((c) => c.term === term) || {}, past = (panel.historical_cards || []).find((c) => c.term === term) || {};
+      const r = searchUsable(recent, false).usable ? clamp1(-(recent.ratio - 1) / 0.5, -1, SEARCH_CAP) : null;
+      const h = searchUsable(past, true).usable ? clamp1(-(past.percentile - 50) / 50, -1, SEARCH_CAP) : null;
+      // The recent week weighs 60%, the month's place in 20 years 40%; either alone stands in for both.
+      const score = isNum(r) && isNum(h) ? 0.6 * r + 0.4 * h : isNum(r) ? r : h;
+      const reading = [isNum(r) ? `${nf2.format(recent.ratio)}× baseline` : null, isNum(h) ? `${ordinal(Math.round(past.percentile))} pct since 2004` : null].filter(Boolean).join(" · ");
+      return { key: term, name: `“${term}”`, weight: 100 / searchTerms.length, score, reading: reading || "No fresh reading", as_of: recent.as_of || past.as_of,
+               pct: isNum(h) ? past.percentile : null, rule: "baseline 1.0× = 0; 1.5× = −1; quieter up to +0.4 · 60% week, 40% month's percentile" };
+    });
+  };
+  const VERDICT_TEXT = {
+    sentiment: { scale: "bearish mood … bullish mood", method: "The label describes the current mood across five crowds: options traders pricing volatility (VIX), individual investors (AAII), institutions' futures positions (COT), options volume (put/call) and CNN's composite. VIX and AAII measure different people directly and get the most weight; Fear & Greed counts less because it is partly built from VIX and put/call. Extreme readings are often read contrarian; this label reports the mood, not a forecast." },
+    leverage: { scale: "high leverage (bearish) … low leverage (bullish)", method: "Each measure is ranked against its own history. The higher the percentile, the more borrowed money is in the market, and the harder a selloff can hit when it unwinds, so the reading is scored bearish. Leveraged funds' futures positions count as bearish at either extreme, since a deep net short is often a borrowed-money basis trade. Leverage can stay high for years: this is risk, not timing." },
+    searches: { scale: "rising worry (bearish) … quiet (up to leaning bullish)", method: "Six Google searches from the USA, equally weighted: rising attention to recession, layoffs, inflation, bank failures, crashes or war scores bearish. Each term blends its latest week against the eight before it (60%) with its latest month's rank since 2004 (40%). Quiet searches score at most +0.4, because low attention does not mean optimism, so this tab never reads fully Bullish." },
+  };
+  const renderVerdict = (key, parts) => {
+    const v = verdict(parts), text = VERDICT_TEXT[key];
+    const nuance = v.historic ? ` · historic ${v.historic.side}` : "";
+    $(`tab-label-${key}`).textContent = `${v.label}${nuance}`;
+    $(`tab-label-${key}`).className = `page-tab-label ${v.tone}`;
+    const at = isNum(v.score) ? (v.score + 1) / 2 * 100 : null;
+    $(`verdict-${key}`).innerHTML =
+      `<div class="verdict-head"><span class="verdict-label ${v.tone}">${esc(v.label)}</span>` +
+      (isNum(v.score) ? `<span class="verdict-meter" role="img" aria-label="Weighted score ${signed2(v.score)} on a scale from −1 to +1"><span class="verdict-dot" style="left:${at.toFixed(1)}%"></span></span>` +
+        `<span class="verdict-score">${signed2(v.score)} <small>on −1 … +1 · ${esc(text.scale)}</small></span>` : "") + `</div>` +
+      `<p class="verdict-note">${nf0.format(v.coverage)}% of the weight has fresh data${v.coverage < 100 ? "; missing inputs are left out and the rest rescaled" : ""}.` +
+      (v.label === "Insufficient data" ? ` A label needs at least 3 inputs and ${MIN_COVERAGE}% of the weight.` : "") +
+      (v.historic ? ` <strong>Historic ${v.historic.side}:</strong> ${esc(v.historic.part.name)} is at the ${esc(ordinal(Math.round(v.historic.part.pct)))} percentile of its own history.` : "") + `</p>` +
+      `<details class="verdict-parts"><summary>How this label is weighted</summary><div class="macro-windows-wrap"><table class="macro-windows">` +
+      `<thead><tr><th scope="col">Input</th><th scope="col">Reading</th><th scope="col">Score</th><th scope="col">Base weight</th><th scope="col">Counts for</th><th scope="col">Rule</th></tr></thead><tbody>` +
+      v.rows.map((p) => `<tr${isNum(p.score) ? "" : ' class="excluded"'}><th scope="row">${esc(p.name)}</th><td>${esc(p.reading)}</td>` +
+        `<td class="${isNum(p.score) ? p.score > 0 ? "up" : p.score < 0 ? "down" : "" : ""}">${isNum(p.score) ? signed2(p.score) : "—"}</td>` +
+        `<td>${nf0.format(p.weight)}%</td><td>${isNum(p.share) ? `${nf0.format(p.share)}%` : "excluded"}</td><td class="sub">${esc(p.rule)}</td></tr>`).join("") +
+      `</tbody></table></div><p class="macro-note">Bands: +0.50 and above Bullish · +0.20 Leaning bullish · between −0.20 and +0.20 Neutral, or Mixed when strong inputs pull both ways · −0.20 Leaning bearish · −0.50 and below Bearish. ` +
+      `“Historic high/low” marks an input within ${HISTORIC} percentile points of either end of its own history. ${esc(text.method)}</p></details>`;
+    return v;
   };
 
   /* ---------- market leverage: every card dated by its own release ---------- */
@@ -278,13 +394,7 @@
     const saved = DATA.market_leverage?.cards || [];
     const cards = LEVER_CARDS.map(d => ({...d, ...(saved.find(c => c.key === d.key) || {})}))
       .map(c => ({...c, usable: ["ok", "cached"].includes(c.status) && isoDate(c.as_of)}));
-    $("lever-toggle").setAttribute("aria-expanded", String(state.leverOpen));
-    $("lever-body").hidden = !state.leverOpen;
-    $("lever-oneline").hidden = state.leverOpen;
-    $("lever-oneline").innerHTML = cards.map(c => `<span><b>${esc(c.short)}</b> ${c.usable ? `${esc(c.reading)} · ${esc(c.signal)}` : "—"}</span>`).join("");
-    const ranked = cards.filter(c => c.usable && c.tone), elevated = ranked.filter(c => c.tone === "high").length;
-    $("lever-summary").textContent = ranked.length < 3 ? "Limited coverage" : elevated ? `${elevated} of ${ranked.length} measures elevated` : "Within usual ranges";
-    $("lever-summary").className = `sentiment-badge${ranked.length >= 3 && elevated ? " elevated" : ""}`;
+    renderVerdict("leverage", leverParts());
     $("lever-note").textContent = `${cards.filter(c => c.usable).length}/${cards.length} sources available · Each reading is ranked against its own history, and each card gives the period its data covers, when that was released and when the next release is due. ${DATA.market_leverage?.checked_at ? `Sources checked ${fetchedLabel(DATA.market_leverage.checked_at).replace(/^Fetched /, "")}.` : "Refresh data to collect leverage."}`;
     $("lever-cards").innerHTML = cards.map(c => {
       const badge = !c.usable ? "unknown" : c.tone === "high" ? "elevated" : "";
@@ -1038,7 +1148,20 @@
 
   /* ---------- render ---------- */
   const MARKET_LABEL = { all: "US and TSX listings", us: "US-listed only", tsx: "TSX-listed (incl. interlisted)" };
+  /* Four pages share one document: the IV scan, then the three market-context tabs, each labelled from its own data. */
+  const renderPage = () => {
+    for (const key of PAGES) {
+      const on = key === state.page;
+      $(`tab-${key}`).setAttribute("aria-selected", String(on));
+      $(`tab-${key}`).tabIndex = on ? 0 : -1;
+      $(`page-${key}`).hidden = !on;
+    }
+    // A chart drawn while its tab was hidden had no width to measure; draw it again now it shows.
+    if (state.page === "sentiment") renderMacroChart();
+    if (state.page === "leverage") renderLeverChart();
+  };
   const render = () => {
+    renderPage();
     U = (DATA.universe_by_cap && DATA.universe_by_cap[state.cap]) || DATA.universe;
     renderMacro();
     renderMacroSearch();
@@ -1223,6 +1346,7 @@
       next.focus();
     });
   };
+  wireSeg("page-tabs", "page", (v) => { state.page = v; persist(); }, "aria-selected", renderPage);
   wireSeg("cap-tabs", "cap", (v) => { state.cap = v; state.open.clear(); persist(); }, "aria-selected");
   wireSeg("market-seg", "market", (v) => { state.market = v; persist(); });
   wireSeg("frame-seg", "frame", (v) => { state.frame = v; persist(); });
@@ -1235,18 +1359,11 @@
     searchView = button.dataset.searchView;
     renderMacroSearch();
   });
-  $("search-toggle").addEventListener("click", () => {
-    const open = $("search-toggle").getAttribute("aria-expanded") !== "true";
-    $("search-toggle").setAttribute("aria-expanded", String(open));
-    $("search-body").hidden = !open;
-  });
-  $("macro-toggle").addEventListener("click", () => { state.macroOpen = !state.macroOpen; persist(); renderMacro(); });
   $("macro-plot").addEventListener("pointermove", macroChart.move);
   $("macro-plot").addEventListener("pointerleave", macroChart.leave);
   wireSeg("lever-series-seg", "lseries", (v) => { state.lseries = v; persist(); }, "aria-checked", renderLeverChart);
   wireSeg("lever-range-seg", "lrange", (v) => { state.lrange = v; persist(); }, "aria-checked", renderLeverChart);
   $("lever-log").addEventListener("change", (ev) => { state.llog = ev.target.checked; persist(); renderLeverChart(); });
-  $("lever-toggle").addEventListener("click", () => { state.leverOpen = !state.leverOpen; persist(); renderLeverage(); });
   $("lever-plot").addEventListener("pointermove", leverChart.move);
   $("lever-plot").addEventListener("pointerleave", leverChart.leave);
   $("hq-only").addEventListener("change", (ev) => { state.hqOnly = ev.target.checked; persist(); render(); });

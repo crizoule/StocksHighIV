@@ -134,6 +134,40 @@ button { font: inherit; color: inherit; }
 .cap-tabs button:hover { background: var(--accent-wash); color: var(--ink); }
 .cap-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent-ink); }
 .cap-panel { display: grid; gap: 22px; min-width: 0; }
+/* Page tabs: the IV scan and three market-context pages, each context tab carrying its weighted label */
+.page-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.page-tabs button {
+  display: grid; justify-items: start; gap: 4px; min-width: 150px; padding: 12px 16px; cursor: pointer; text-align: left;
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--surface-2); color: var(--ink-2);
+}
+.page-tabs button:hover { border-color: var(--rule-strong); color: var(--ink); }
+.page-tabs button[aria-selected="true"] { background: var(--surface); border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); color: var(--ink); }
+.page-tab-name { font-weight: 700; font-size: 15px; }
+.page-tab-label { font: 600 11px var(--font-ui); color: var(--ink-3); }
+.page-tab-label:empty { display: none; }
+.page-tab-label.positive { color: var(--up); }
+.page-tab-label.negative { color: var(--down); }
+.page-tab-label.mixed { color: var(--ink-2); }
+.page-panel { display: grid; gap: 22px; min-width: 0; }
+.page-panel .macro { margin: 0; }
+/* The weighted label at the top of each context page */
+.verdict { margin-top: 16px; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface-2); }
+.verdict:empty { display: none; }
+.verdict-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.verdict-label { font-weight: 800; font-stretch: 110%; font-size: 22px; letter-spacing: -0.01em; }
+.verdict-label.positive { color: var(--up); }
+.verdict-label.negative { color: var(--down); }
+.verdict-label.mixed { color: var(--ink); }
+.verdict-label.unknown { color: var(--ink-3); }
+.verdict-meter { position: relative; width: 180px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--down), var(--track) 50%, var(--up)); }
+.verdict-dot { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: 50%; background: var(--ink); border: 2px solid var(--surface); transform: translate(-50%, -50%); }
+.verdict-score { font: 600 14px var(--font-mono); }
+.verdict-score small { font: 500 11px var(--font-ui); color: var(--ink-3); margin-left: 4px; }
+.verdict-note { margin: 10px 0 0; color: var(--ink-2); font-size: 12px; line-height: 1.6; }
+.verdict-parts { margin-top: 8px; font-size: 12px; }
+.verdict-parts summary { cursor: pointer; color: var(--accent-ink); }
+.verdict-parts .macro-windows td.sub { white-space: normal; min-width: 180px; text-align: left; font: 500 11px var(--font-ui); color: var(--ink-3); }
+.verdict-parts .macro-windows tr.excluded { color: var(--ink-3); }
 
 /* Masthead: chart-recorder grid fading down behind the title */
 .masthead {
@@ -603,12 +637,6 @@ th.col-stock { z-index: 2; }
 .macro-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .macro-heading .eyebrow { margin: 0 0 6px; }
 .macro-heading h2 { margin: 0; font-size: 22px; letter-spacing: -.03em; }
-.macro-toggle { display: inline-flex; align-items: center; gap: 10px; border: 0; padding: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; }
-.macro-toggle .chevron { width: 0; height: 0; border-block: 6px solid transparent; border-left: 8px solid var(--ink-3); transition: transform .15s; }
-.macro-toggle[aria-expanded="true"] .chevron { transform: rotate(90deg); }
-.macro-toggle:hover .chevron { border-left-color: var(--accent); }
-.macro-oneline { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 0 0; color: var(--ink-2); font: 500 13px var(--font-mono); }
-.macro-oneline b { margin-right: 6px; color: var(--ink); font: 650 12px var(--font-ui); }
 .macro-note, .sentiment-meta { color: var(--ink-3); font-size: 11px; line-height: 1.6; }
 .macro-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-top: 18px; }
 .macro-card { padding: 18px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface-2); min-width: 0; }
@@ -707,6 +735,8 @@ th.col-stock { z-index: 2; }
 @media (max-width: 1180px) { .macro-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 960px) { .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 540px) {
+  .page-tabs button { min-width: 0; flex: 1 1 40%; padding: 10px 12px; }
+  .verdict-meter { width: 120px; }
   .macro { padding: 16px; }
   .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid, .sentiment-components { grid-template-columns: minmax(0, 1fr); }
   .macro-chart { padding: 12px; }
