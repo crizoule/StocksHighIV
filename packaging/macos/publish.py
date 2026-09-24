@@ -41,7 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''Fixes the Leverage tab showing "No reading · refresh data" for the two ProShares inputs, and reading Insufficient data, after updating to 3.2.0. A refresh within six hours of the update reused the leveraged-ETF data an older version had saved, which holds trading volume only. That older copy is now fetched again, so the first refresh after updating collects the fund flows and asset share.
+    notes = '''A new Commodities tab charts 31 commodity futures markets, each price above the CFTC's weekly Commitments of Traders positions for the same market: managed money (hedge funds and commodity trading advisers) and producers. Markets are grouped into energy, grains, oilseeds, softs, metals, livestock, dairy and lumber, with the most-held markets first. Each card shows the price and its 1-month and 1-year change, managed money's net position and its three-year COT index (crowded long at 80 or above, crowded short at 20 or below), and a small chart. Select a card to see that market on the full chart. The other 243 contracts in the report, such as regional natural-gas swaps, electricity and emissions, are listed below with their open interest.
+
+The Searches tab is now marked Beta: Google Trends data is sampled, often refused, and revised between downloads.
+
+Refresh your data once after updating to collect the commodity history.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
