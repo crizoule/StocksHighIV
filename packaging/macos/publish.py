@@ -41,11 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''A new Market leverage panel sits below Macro sentiment. It shows how much investors are borrowing, from six free public sources: FINRA margin debt, the Fed's Z.1 margin loans against US stock market value, hedge-fund leverage from the OFR's Form PF data, hedge funds' S&P 500 futures positions from the CFTC, trading in 3× leveraged ETFs as a daily retail proxy, and the Fed's Financial Stability Report.
+    notes = '''The AAII chart now shows the survey's three answers as separate lines: bullish in green, neutral dashed grey, bearish in red, back to 1987. Hovering shows all three for a week, and the table below gives each one's average for every range. The correlation column still uses the bull–bear spread. The AAII card lists the three percentages under the spread, and a week you enter by hand appears on all three lines at once.
 
-Each card gives the period its data covers, when that release came out, and when the next one is due: the publisher's own date where one is announced, otherwise an estimate from the source's usual rhythm, flagged as due once it passes. Readings are ranked against their own history, and the top fifth is marked elevated. Below the cards, the same S&P 500 chart as the sentiment panel plots any of seven leverage series, back to 1987 where the data reaches.
+Every card in Macro sentiment and Market leverage now underlines the period its data covers, such as "As of Sep 17, 2026" or "Data August 2026 · monthly", so a weekly or monthly figure is not read as today's.
 
-On September 24 all six sources answered: margin debt $1.45T, up 37% in a year; hedge funds 2.57× gross assets to net assets, 8.59× counting derivatives, the highest in the OFR's series since 2013. The panel and both charts fill in on the first data refresh after updating.
+Reports saved before this version keep the single spread line until their next data refresh.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
