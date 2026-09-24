@@ -41,11 +41,11 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''A new Commodities tab charts 31 commodity futures markets, each price above the CFTC's weekly Commitments of Traders positions for the same market: managed money (hedge funds and commodity trading advisers) and producers. Markets are grouped into energy, grains, oilseeds, softs, metals, livestock, dairy and lumber, with the most-held markets first. Each card shows the price and its 1-month and 1-year change, managed money's net position and its three-year COT index (crowded long at 80 or above, crowded short at 20 or below), and a small chart. Select a card to see that market on the full chart. The other 243 contracts in the report, such as regional natural-gas swaps, electricity and emissions, are listed below with their open interest.
+    notes = '''The Commodities tab now also covers 26 financial futures from the CFTC's Commitments of Traders report: stock indices, Treasuries, fed funds, currencies, VIX, bitcoin and ether, each price above its weekly positions.
 
-The Searches tab is now marked Beta: Google Trends data is sampled, often refused, and revised between downloads.
+Financial futures are read differently from physical commodities, which have producers hedging on the other side of the speculators. In stock indices, Treasuries and crypto, leveraged funds' large net shorts are mostly basis trades (short futures against long stocks, bonds or ETFs, financed with borrowed money), so asset managers' real-money position leads. In currencies, short-term rates and VIX, leveraged funds are the speculative bet and lead. Each category says which group leads and what a long position means, such as a bet on falling yields for Treasuries or on rising volatility for VIX. The other financial contracts in the report are listed beside the commodity ones.
 
-Refresh your data once after updating to collect the commodity history.
+Refresh your data once after updating to collect the financial futures.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
