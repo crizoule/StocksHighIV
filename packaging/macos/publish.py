@@ -41,7 +41,7 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''The Commodities tab now has a market navigator beside its big chart. Physical commodities and financial futures are listed by category; open a category to see its markets with their COT index, and choose one to chart it. Markets whose positioning sits at an extreme of the last three years carry a label (extreme or near-extreme long, short, or light where asset managers lead), and a collapsed category shows how many of its markets are flagged. The cards below the chart are unchanged.
+    notes = '''On desktop, the market navigator beside the Commodities chart now runs to the bottom of the chart card and scrolls within it, instead of stopping partway down.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
