@@ -23,7 +23,7 @@ import httpx
 import pandas as pd
 import yfinance as yf
 
-from . import aaii, config, context, fear_greed, market, net, progress
+from . import aaii, config, context, fear_greed, market, naaim, net, progress
 
 VIX_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
 PC_URL = "https://www.cboe.com/us/options/market_statistics/daily/"
@@ -36,6 +36,7 @@ MACRO = {
     "aaii": ("AAII sentiment", AAII_URL, 10),
     "cnn": ("Fear & Greed", CNN_PAGE, 2),
     "cot": ("COT positioning", "https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm", 14),  # Tuesday data, out Friday
+    "naaim": ("NAAIM exposure", naaim.PAGE_URL, 120),  # public data runs three months late; never in the Sentiment label
 }
 # CFTC's public reporting API: Traders in Financial Futures, futures only. No key; one request returns every week since 2006.
 COT_URL = "https://publicreporting.cftc.gov/resource/gpe5-46if.json"
@@ -49,7 +50,7 @@ PUT_CALL_ARCHIVES = (             # Cboe's discontinued daily files; the newer o
     "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypcarchive.csv",  # Oct 2003 – Jun 2012
     "https://cdn.cboe.com/resources/options/volume_and_call_put_ratios/equitypc.csv",         # Nov 2006 – Oct 2019
 )
-TTL_HOURS = {("history", "put_call_archive"): 24 * 30}  # Cboe no longer updates these files
+TTL_HOURS = {("history", "put_call_archive"): 24 * 30, ("macro", "naaim"): 24}  # NAAIM's table adds one week a week  # Cboe no longer updates these files
 COMPLETE = {  # readings saved before 1.6.0 hold only 10 years of history
     ("history", "spx"): lambda item: (item.get("points") or [["9999"]])[0][0] <= "1987-07-31" and bool(item.get("rsi")),
     ("macro", "vix"): lambda item: (item.get("history") or [["9999"]])[0][0] <= "1990-01-31",
@@ -760,7 +761,8 @@ def collect(rows, *, now=None):
                    "put_call": lambda: parse_put_call(request_text(client, PC_URL), today),
                    "aaii": lambda: parse_aaii(request_text(client, AAII_URL), today),
                    "cnn": lambda: fetch_cnn(client, today),
-                   "cot": lambda: fetch_cot(client, today)}
+                   "cot": lambda: fetch_cot(client, today),
+                   "naaim": lambda: naaim.parse_table(request_text(client, naaim.TABLE_URL), today)}
         for key, fetch in parsers.items():
             def macro_fetch(fetch=fetch):
                 item = fetch()
@@ -800,6 +802,8 @@ def collect(rows, *, now=None):
         # After the pool, so it never races the replica's own backfill of the same file.
         result["history"]["put_call_gap"] = fill_put_call_gap(client, result["history"])
     result["macro"]["aaii"] = with_aaii_import(result["macro"]["aaii"], today)
+    result["macro"]["naaim"] = naaim.reading(result["macro"]["naaim"])  # the bundled history, plus any newer public weeks
+    result["history"]["naaim"] = result["macro"]["naaim"]["history"]
     result["history"]["aaii"] = aaii.spread_series(config.DATA_DIR, result["macro"]["aaii"])
     result["history"]["aaii_shares"] = aaii.share_series(config.DATA_DIR, result["macro"]["aaii"])
     result["history"]["put_call"] = put_call_series((result["history"].get("put_call_archive") or {}).get("daily") or [])
@@ -862,6 +866,7 @@ def chart_history(macro, history):
         "macd": dict(name=f"MACD {MACD_FAST}/{MACD_SLOW}/{MACD_SIGNAL}, % of index", unit="%", source="Computed from S&P 500 daily closes",
                      frequency="daily", points=(history.get("spx") or {}).get("macd") or [],
                      signal=(history.get("spx") or {}).get("macd_signal") or []),
+        "naaim": naaim.chart_series(history.get("naaim") or []),
         "cot": dict(name="COT: asset managers' net, % of non-spreading open interest", unit="%",
                     source="CFTC Traders in Financial Futures · E-mini S&P 500", frequency="weekly",
                     points=(macro.get("cot") or {}).get("history") or [],

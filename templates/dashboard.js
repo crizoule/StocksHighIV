@@ -27,7 +27,7 @@
     if (saved && ["all", "us", "tsx"].includes(saved.market)) state.market = saved.market;
     if (saved && FRAMES.includes(saved.frame)) state.frame = saved.frame;
     if (saved) state.hqOnly = Boolean(saved.hqOnly);
-    if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot", "rsi", "macd"].includes(saved.mseries)) state.mseries = saved.mseries;
+    if (saved && ["aaii", "vix", "put_call", "fear_greed", "cot", "naaim", "rsi", "macd"].includes(saved.mseries)) state.mseries = saved.mseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.mrange)) state.mrange = saved.mrange;
     if (saved && ["finra", "z1", "ofr", "ofr_gne", "cot_lev", "etf_flows", "etf_share", "etf_activity"].includes(saved.lseries)) state.lseries = saved.lseries;
     if (saved && ["1M", "3M", "6M", "1Y", "5Y", "10Y", "20Y", "MAX"].includes(saved.lrange)) state.lrange = saved.lrange;
@@ -158,6 +158,10 @@
   const cotRows = (c) => (c.groups || []).map((g, i) => `<p class="sentiment-meta">${i ? `${esc(g.name)} · asset managers` : "Asset managers"} ` +
     `${esc(contracts(g.asset_managers))}${esc(cotIndex(g.asset_managers_index))} · leveraged funds ${esc(contracts(g.leveraged))}${esc(cotIndex(g.leveraged_index))}` +
     (isNum(g.dealers) ? ` · dealers ${esc(contracts(g.dealers))}${esc(cotIndex(g.dealers_index))}` : "") + `</p>`).join("");
+  // NAAIM sells current readings; the public table runs three months late, so the card says so and stays out of the label.
+  const naaimRows = (c) => `<p class="sentiment-meta">Active managers' average US equity exposure${isNum(c.percentile) ? ` · ${ordinal(c.percentile)} percentile since 2006` : ""}</p>` +
+    (Array.isArray(c.quartiles) && c.quartiles.every(isNum) ? `<p class="sentiment-meta">Quartiles ${c.quartiles.map((q) => `${nf0.format(q)}%`).join(" · ")}</p>` : "") +
+    `<p class="sentiment-meta naaim-delay">Published three months late; not counted in the Sentiment label${isoDate(c.next_public) ? ` · next week public around ${esc(mediumDate.format(day(c.next_public)))}` : ""}</p>`;
   const renamed = (name) => name === "CNN Fear & Greed" ? "Fear & Greed" : name;  // reports saved before 1.6.0
   const renderMacro = () => {
     const defaults = [
@@ -166,6 +170,7 @@
       {key:"aaii", name:"AAII sentiment", url:"https://www.aaii.com/sentimentsurvey"},
       {key:"cnn", name:"Fear & Greed", url:"https://www.cnn.com/markets/fear-and-greed"},
       {key:"cot", name:"COT positioning", url:"https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm"},
+      {key:"naaim", name:"NAAIM exposure", url:"https://naaim.org/programs/naaim-exposure-index/"},
     ];
     const cards = defaults.map(d => ({...d, ...(DATA.macro_sentiment?.cards || []).find(c => c.key === d.key)}))
       .map(c => ({...c, name: renamed(c.name), usable: isNum(c.value) && ["ok", "cached"].includes(c.status) && sentimentFresh(c.as_of, c.max_age || 4)}));
@@ -187,6 +192,7 @@
         (c.replica_of ? `<p class="sentiment-meta">Not CNN's reading · CNN feed ${c.cnn_status === "stale" && c.cnn_as_of ? `stale since ${esc(c.cnn_as_of)}` : "unavailable"}</p>` : "") +
         (replica && c.usable ? `<p class="sentiment-meta">Replica ${nf1.format(replica.value)} · ${replica.value >= c.value ? "+" : "−"}${nf1.format(Math.abs(replica.value - c.value))} vs CNN</p>` : "") +
         (c.key === "cot" ? cotRows(c) : "") +
+        (c.key === "naaim" ? naaimRows(c) : "") +
         (c.ratios ? `<p class="sentiment-meta">Total ${isNum(c.ratios.total) ? nf2.format(c.ratios.total) : "—"} · Index ${isNum(c.ratios.index) ? nf2.format(c.ratios.index) : "—"}</p>` : "") +
         `<details><summary>Evidence &amp; source</summary><p>${esc(c.detail || c.error || "No verified reading in this report. The source may block automated access; no substitute value is estimated.")}</p>` +
         (c.key === "aaii" ? `<p>AAII blocks automated access, so the app does not fetch this survey. Each Thursday, copy the new week's three percentages from ${sentimentLink(c.url, "AAII's results page")} into this card. <button type="button" class="link-button" data-aaii-edit>Enter or correct a week</button></p>` : "") +
@@ -344,7 +350,7 @@
     });
   };
   const VERDICT_TEXT = {
-    sentiment: { scale: "bearish mood … bullish mood", method: "The label describes the current mood across five crowds: options traders pricing volatility (VIX), individual investors (AAII), institutions' futures positions (COT), options volume (put/call) and CNN's composite. VIX and AAII measure different people directly and get the most weight; Fear & Greed counts less because it is partly built from VIX and put/call. Extreme readings are often read contrarian; this label reports the mood, not a forecast." },
+    sentiment: { scale: "bearish mood … bullish mood", method: "The label describes the current mood across five crowds: options traders pricing volatility (VIX), individual investors (AAII), institutions' futures positions (COT), options volume (put/call) and CNN's composite. VIX and AAII measure different people directly and get the most weight; Fear & Greed counts less because it is partly built from VIX and put/call. Extreme readings are often read contrarian; this label reports the mood, not a forecast. NAAIM's survey of active managers is shown but not counted: its public data runs three months late." },
     leverage: { scale: "less leverage (bearish) … more leverage (bullish)", method: "More leverage means more borrowed or leveraged money betting on stocks, so a measure high in its own history reads bullish. The weighting favours what updates often: ProShares' daily 3× fund data carries 60% (net flows 35%, bull funds' share of assets 25%), FINRA's monthly margin debt 30%, and the quarterly OFR and Fed Z.1 figures and weekly CFTC positions 10% between them. Retail tends to add to bull funds on dips while a rally holds, so heavy inflows can arrive during a selloff; when leveraged holders give up, bull funds' share of assets falls. The same leverage makes a selloff sharper if it unwinds." },
 
     searches: { scale: "rising worry (bearish) … quiet (up to leaning bullish)", method: "Six Google searches from the USA, equally weighted: rising attention to recession, layoffs, inflation, bank failures, crashes or war scores bearish. Each term blends its latest week against the eight before it (60%) with its latest month's rank since 2004 (40%). Quiet searches score at most +0.4, because low attention does not mean optimism, so this tab never reads fully Bullish." },
@@ -438,6 +444,7 @@
     rsi: { short: "RSI 14", fmt: (v) => nf1.format(v), ref: 50, refLabel: "line at 50: gains balance losses", derived: true },
     macd: { short: "MACD", fmt: signedFmt(2, "%"), ref: 0, refLabel: "line at 0: MACD crosses its signal", second: "signal", histogram: true, derived: true },
     cot: { short: "COT net", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: net flat", second: "dealers" },
+    naaim: { short: "NAAIM exposure", fmt: (v) => `${nf1.format(v)}%`, ref: 100, refLabel: "line at 100: fully invested; above uses leverage" },
   };
   const LEVER_SERIES = {
     finra: { short: "Margin debt, 12-month change", fmt: signedFmt(1, "%"), ref: 0, refLabel: "line at 0: no change in a year" },

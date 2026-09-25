@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
 import webbrowser
 
-from . import aaii, config, watchlist
+from . import aaii, config, naaim, watchlist
 
 APP_ID = 'stockshighiv-local-v1'
 
@@ -307,7 +307,7 @@ def handler(app):
                     # Upgrade presentation while retaining the exact saved market data.
                     payload_match = re.search(rb'<script id="payload" type="application/json">(.*?)</script>', body, re.S)
                     if payload_match:
-                        saved_payload = aaii.apply_entered(json.loads(payload_match[1]), app.data_root/'data')
+                        saved_payload = naaim.apply_bundled(aaii.apply_entered(json.loads(payload_match[1]), app.data_root/'data'))
                         for row in saved_payload.get('rows', []):
                             symbol = row.get('yahoo_symbol') or row.get('symbol', '')
                             if not row.get('logo_webp') and re.fullmatch(r'[A-Z0-9.\-]{1,24}', symbol):

@@ -649,7 +649,7 @@ th.col-stock { z-index: 2; }
 .sentiment-badge.negative { color: var(--down); background: color-mix(in srgb, var(--down) 10%, var(--surface)); }
 .sentiment-badge.unknown { color: var(--ink-3); background: var(--track); }
 .sentiment-badge.elevated { color: var(--signal); background: color-mix(in srgb, var(--signal) 12%, var(--surface)); }
-.macro-grid.lever-grid, .macro-grid.search-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.macro-grid.lever-grid, .macro-grid.search-grid, .macro-grid.sentiment-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .lever-dates { display: grid; gap: 2px; margin: 12px 0 10px; padding: 8px 10px; border-radius: 6px; background: var(--surface); font: 500 11px var(--font-mono); color: var(--ink-2); }
 .lever-dates b { font: 600 11px var(--font-ui); color: var(--ink-3); margin-right: 6px; }
 .lever-dates .due { color: var(--signal); }
@@ -723,6 +723,7 @@ th.col-stock { z-index: 2; }
 .cmdty-others summary { cursor: pointer; color: var(--accent-ink); font-weight: 600; }
 .cmdty-others-table th[scope="row"] { white-space: normal; min-width: 220px; font-weight: 500; }
 .cmdty-others-table .cmdty-others-group th { padding-top: 14px; text-align: left; color: var(--ink); font: 700 12px var(--font-ui); background: var(--surface); }
+.naaim-delay { color: var(--signal); }
 .lever-lines { margin: 0; padding-left: 16px; color: var(--ink-2); font-size: 11px; line-height: 1.6; }
 .lever-lines li { margin: 3px 0; }
 .sentiment-method { margin-top: 18px; font-size: 12px; line-height: 1.65; color: var(--ink-2); }
@@ -796,12 +797,12 @@ th.col-stock { z-index: 2; }
 .replica-parts li { margin: 6px 0; }
 .replica-parts span { display: block; color: var(--ink-3); }
 @media (max-width: 1180px) { .macro-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .macro-grid.cmdty-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 960px) { .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid, .macro-grid.cmdty-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 960px) { .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid, .macro-grid.cmdty-grid, .macro-grid.sentiment-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 540px) {
   .page-tabs button { min-width: 0; flex: 1 1 40%; padding: 10px 12px; }
   .verdict-meter { width: 120px; }
   .macro { padding: 16px; }
-  .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid, .macro-grid.cmdty-grid, .sentiment-components { grid-template-columns: minmax(0, 1fr); }
+  .macro-grid, .macro-grid.lever-grid, .macro-grid.search-grid, .macro-grid.cmdty-grid, .macro-grid.sentiment-grid, .sentiment-components { grid-template-columns: minmax(0, 1fr); }
   .macro-chart { padding: 12px; }
 }
 

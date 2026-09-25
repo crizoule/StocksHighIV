@@ -71,7 +71,7 @@ class MacroTests(unittest.TestCase):
         sources = {"macro": {"vix": {"status": "cached", "value": 15, "as_of": "2026-09-01"},
                               "aaii": {"status": "ok", "value": -20, "as_of": "2026-09-09"}}}
         cards = evaluate(sources=sources)["macro_sentiment"]["cards"]
-        self.assertEqual([c["status"] for c in cards], ["stale", "unavailable", "ok", "unavailable", "unavailable"])
+        self.assertEqual([c["status"] for c in cards], ["stale", "unavailable", "ok", "unavailable", "unavailable", "unavailable"])  # NAAIM last
         self.assertEqual(cards[0]["as_of"], "2026-09-01")
 
     def test_replica_is_a_cross_check_and_stands_in_only_without_a_fresh_cnn_reading(self):

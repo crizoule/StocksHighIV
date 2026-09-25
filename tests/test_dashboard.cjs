@@ -431,6 +431,26 @@ test('macro chart draws the S&P 500 over the chosen series with range statistics
   assert.match(empty.element('macro-plot').innerHTML, /S&amp;P 500 history appears after the next data refresh/);
 });
 
+test('NAAIM card says it is three months late, charts against the S&P 500, and stays out of the label', () => {
+  const card = {key: 'naaim', name: 'NAAIM exposure', status: 'ok', as_of: '2026-07-29', max_age: 120, value: 79.7, reading: '79.70',
+    signal: 'Moderately invested', delayed: true, percentile: 63, quartiles: [60, 90, 100], next_public: '2026-11-04', detail: 'NAAIM weekly survey'};
+  const weeks = [];
+  for (let t = Date.parse('2024-07-03T00:00:00Z'); t <= Date.parse('2026-07-29T00:00:00Z'); t += 7 * 864e5) weeks.push(new Date(t).toISOString().slice(0, 10));
+  const spx = weeks.map((d, i) => [d, 5500 + i * 10]);
+  const history = {spx, series: {naaim: {name: 'NAAIM exposure index', frequency: 'weekly', source: 'NAAIM weekly survey', points: weeks.map((d, i) => [d, 60 + (i % 50)])}}};
+  const app = renderEarnings(null, {}, {macro: {cards: [card], history}, saved: {page: 'sentiment', mseries: 'naaim', mrange: '1Y'}});
+  const cards = app.element('macro-cards').innerHTML;
+  assert.match(cards, /<h3>NAAIM exposure<\/h3><div class="macro-value">79.70<\/div>/);
+  assert.match(cards, /As of Jul 29, 2026/);
+  assert.match(cards, /Active managers&#39; average US equity exposure · 63rd percentile since 2006|Active managers' average US equity exposure · 63rd percentile since 2006/);
+  assert.match(cards, /Quartiles 60% · 90% · 100%/);
+  assert.match(cards, /<p class="sentiment-meta naaim-delay">Published three months late; not counted in the Sentiment label · next week public around Nov 4, 2026<\/p>/);
+  assert.match(app.element('macro-plot').innerHTML, /NAAIM exposure<tspan class="ref-label"> · line at 100: fully invested; above uses leverage<\/tspan>/);
+  assert.match(app.element('macro-legend').innerHTML, /NAAIM exposure index [\d.]+% · Jul 29/);
+  assert.doesNotMatch(app.element('verdict-sentiment').innerHTML, /NAAIM exposure<\/th>/);  // shown, never weighted
+  assert.match(app.element('verdict-sentiment').innerHTML, /NAAIM&#39;s survey of active managers is shown but not counted|NAAIM's survey of active managers is shown but not counted/);
+});
+
 test('COT card shows leveraged funds and asset managers for the S&P 500 and VIX futures', () => {
   const cot = {key: 'cot', name: 'COT positioning', status: 'ok', as_of: '2026-09-15', max_age: 14, value: 48.4, reading: '+48.4% of OI',
     signal: 'Typical positioning', direction: 0, index: 72, detail: 'CFTC Traders in Financial Futures',
@@ -442,7 +462,7 @@ test('COT card shows leveraged funds and asset managers for the S&P 500 and VIX 
   assert.match(card, /<h3>COT positioning<\/h3><div class="macro-value">\+48.4% of OI/);
   assert.match(card, /Asset managers \+904,684 · index 34 · leveraged funds −293,143 · index 72 · dealers −702,938 · index 12/);
   assert.match(card, /VIX futures · asset managers −52,658 · index 1 · leveraged funds −16,504 · index 70/);
-  assert.match(app.element('macro-note').textContent, /^1\/5 fresh readings/);
+  assert.match(app.element('macro-note').textContent, /^1\/6 fresh readings/);
 });
 
 test('the S&P 500 can use a log scale, and reports saved before the rename keep the new card names', () => {
@@ -467,7 +487,7 @@ test('macro excludes stale data and retains source observation dates', () => {
     {key:'aaii', value:-25, reading:'-25 pp', status:'ok', as_of:'2026-08-01', max_age:10, signal:'Bearish', direction:-1},
   ]}});
   assert.equal(app.element('tab-label-sentiment').textContent, 'Insufficient data');  // one fresh input of five
-  assert.match(app.element('macro-note').textContent, /1\/5 fresh readings/);
+  assert.match(app.element('macro-note').textContent, /1\/6 fresh readings/);
   assert.match(app.element('macro-cards').innerHTML, /Stale · excluded/);
   assert.match(app.element('macro-cards').innerHTML, /As of Aug 1, 2026/);
   assert.match(app.element('macro-cards').innerHTML, /Unavailable/);
