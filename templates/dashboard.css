@@ -666,10 +666,11 @@ th.col-stock { z-index: 2; }
 .beta-note { margin: 14px 0 10px; padding: 8px 12px; border-left: 3px solid var(--signal); background: var(--sev-elev-bg); color: var(--ink-2); font-size: 12px; line-height: 1.55; border-radius: 0 6px 6px 0; }
 /* Commodities: category sections of cards, each with a small price-over-positioning chart */
 /* Market navigator beside the big chart: sections, collapsible categories, extreme-positioning chips */
-.cmdty-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: start; }
+.cmdty-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 18px; margin-top: 14px; align-items: stretch; }
 .cmdty-main { min-width: 0; }
 .cmdty-main .macro-legend { margin-top: 0; }
-.cmdty-nav { max-height: 640px; overflow: auto; padding: 4px 8px 8px 0; border-right: 1px solid var(--rule); font-size: 12px; }
+/* The chart column sets the row's height; the navigator adds none of its own, fills it and scrolls within it. */
+.cmdty-nav { height: 0; min-height: 100%; overflow: auto; padding: 4px 8px 8px 0; border-right: 1px solid var(--rule); font-size: 12px; }
 .cmdty-nav-section { margin: 12px 0 6px; font: 600 10.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
 .cmdty-nav-section:first-child { margin-top: 0; }
 .cmdty-nav-group { border-radius: 6px; }
@@ -692,7 +693,7 @@ th.col-stock { z-index: 2; }
 .cmdty-flag.near { background: var(--sev-elev-bg); color: var(--signal); }
 @media (max-width: 860px) {
   .cmdty-layout { grid-template-columns: minmax(0, 1fr); }
-  .cmdty-nav { max-height: 320px; border-right: 0; border-bottom: 1px solid var(--rule); padding: 0 0 8px; }
+  .cmdty-nav { height: auto; min-height: 0; max-height: 320px; border-right: 0; border-bottom: 1px solid var(--rule); padding: 0 0 8px; }
 }
 .cmdty-section { margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--rule); }
 .cmdty-section-title { margin: 0; font-size: 19px; font-weight: 800; font-stretch: 110%; letter-spacing: -0.01em; }
