@@ -41,7 +41,9 @@ def main():
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
         raise SystemExit('Commit and push changes before publishing.')
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    notes = '''On desktop, the market navigator beside the Commodities chart now runs to the bottom of the chart card and scrolls within it, instead of stopping partway down.
+    notes = '''The Sentiment tab adds the NAAIM Exposure Index: a weekly survey of active investment managers' US equity exposure, from −200% (leveraged short) to +200% (leveraged long), with 100% meaning fully invested. It has its own card and a chart under the S&P 500, with 20 years of history back to 2006.
+
+Since August 2026, NAAIM sells current readings by subscription and publishes them for free three months late. The card therefore always shows a reading about three months old, says so, and gives the date the next week becomes public; it is not counted in the Sentiment label. Each refresh adds newer weeks as NAAIM makes them public.
 
 Mac 1.1.0+ and packaged Windows 1.2.0+ users can use Check for Updates. Updates preserve watchlists, settings, and saved market data.
 
